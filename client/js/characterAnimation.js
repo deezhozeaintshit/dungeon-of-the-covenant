@@ -20,6 +20,11 @@ const LUNGE_DURATION = 0.24;
 const DEATH_TIP_DURATION = 0.45;
 const DEATH_FADE_DURATION = 0.85;
 
+// Optional damage-event hook (integration: main.js wires real floating damage
+// numbers here). Called with (group, amount) on every detected hp drop.
+let damageListener = null;
+export function setDamageListener(fn) { damageListener = typeof fn === 'function' ? fn : null; }
+
 export function ensureCombatAnimState(group) {
   const u = group.userData;
   if (!u.combatAnim) {
@@ -189,6 +194,9 @@ export function detectDamage(group, hp) {
   u.lastHp = hp;
   if (last !== undefined && hp < last - 0.5) {
     triggerHitFlash(group, Math.min(1.6, 1 + (last - hp) / 60));
+    if (damageListener) {
+      try { damageListener(group, last - hp); } catch (e) { /* listener must never break sync */ }
+    }
     return true;
   }
   return false;

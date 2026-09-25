@@ -13,6 +13,17 @@ import { InAppPurchaseManager } from './inapppurchase.js?v=9.0';
 import { AchievementSystem } from './achievementsystem.js?v=9.0';
 import { SaveSystem } from './savesystem.js?v=9.0';
 import { TutorialSystem } from './tutorialsystem.js?v=9.0';
+// --- upgrade tracks integration (2026-09-25) ---
+import { initCharacterRimLight } from './characterLighting.js?v=9.0';
+import { setDamageListener } from './characterAnimation.js?v=9.0';
+import { applyTheme } from './ui/theme.js?v=5.0';
+import { initMainMenu } from './ui/mainMenu.js?v=5.0';
+import { initCharacterSelect } from './ui/characterSelect.js?v=5.0';
+import { initHUD } from './ui/hud.js?v=5.0';
+import { initScreens } from './ui/screens.js?v=5.0';
+import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
+
+const _projV = new THREE.Vector3(); // shared projector scratch vector
 
 const CLASSES = {
   juggernaut: {
@@ -144,12 +155,55 @@ class GameApp {
     this.initClassSelectionUI();
     this.initLobbyEvents();
 
+    // UI overhaul track: dark-fantasy UI systems (all null-safe, DOM-lazy)
+    applyTheme();
+    this.ui = {};
+    this.ui.menu = initMainMenu({ game: this });
+    this.ui.characterSelect = initCharacterSelect({ classes: CLASSES });
+    this.ui.hud = initHUD({ game: this });
+    this.ui.screens = initScreens({
+      onOpenSettings: () => this.ui.menu?.openSettings(),
+      onRespawn: () => { if (this.network) this.network.sendInput({ action: 'respawn' }); },
+      onQuitToLobby: () => window.location.reload(),
+    });
+    this.ui.damageNumbers = initDamageNumbers();
+    this.ui.damageNumbers.setProjector((w) => {
+      if (!this.renderer || !this.renderer.camera) return null;
+      _projV.set(w.x, w.y !== undefined ? w.y : 1.5, w.z !== undefined ? w.z : 0);
+      _projV.project(this.renderer.camera);
+      if (_projV.z > 1) return null;
+      return {
+        x: (_projV.x * 0.5 + 0.5) * window.innerWidth,
+        y: (-_projV.y * 0.5 + 0.5) * window.innerHeight,
+      };
+    });
+    // Real damage numbers: driven by hp-drop detection on character groups
+    setDamageListener((group, amount) => {
+      if (!this.ui || !this.ui.damageNumbers || !group || !group.position) return;
+      const p = group.position;
+      this.ui.damageNumbers.spawn(
+        { x: p.x, y: p.y + 1.7, z: p.z },
+        amount,
+        amount >= 120 ? 'crit' : 'phys'
+      );
+    });
+    // Boot: loading screen first; lobby reveals on server connect
+    this.ui.screens.loading.show();
+    this.ui.screens.loading.setProgress(8, 'Waking the dungeon…');
+    this.ui.screens.loading.startTips();
+
     // 2. Initialize 3D WebGL Subsystems
     try {
       this.container = document.getElementById('canvas-container');
       this.renderer = new GameRenderer(this.container);
       this.dungeon = new DungeonBuilder(this.renderer.scene);
       this.entities = new EntityManager(this.renderer.scene);
+      // characters track: rim-light rig + PBR env reflections (characters only)
+      initCharacterRimLight(this.renderer.scene, this.renderer.camera);
+      this.renderer.camera.layers.enable(1); // rim light lives on layer 1
+      if (typeof this.entities.setRenderer === 'function') {
+        this.entities.setRenderer(this.renderer.renderer);
+      }
       this.combat = new CombatVisuals(this.renderer.scene);
       this.loot = new LootSystem(this.renderer.scene, (choice) => {
         this.network.submitLootRoll(choice);
@@ -914,6 +968,12 @@ class GameApp {
         const text = document.getElementById('status-text');
         if (badge) badge.classList.add('connected');
         if (text) text.innerText = 'Connected to Server';
+        // UI overhaul track: loading done -> reveal the lobby
+        if (this.ui && this.ui.screens) {
+          this.ui.screens.loading.setProgress(100, 'Ready');
+          this.ui.screens.loading.hide();
+          document.getElementById('lobby-screen')?.classList.remove('hidden');
+        }
       },
       on_disconnect: () => {
         const badge = document.getElementById('connection-status-badge');
@@ -1266,6 +1326,21 @@ class GameApp {
     // 6. Update Party HUD & Quest Banner
     this.updatePartyHUD(snap.players);
 
+    // UI overhaul track: vitals + death screen from real snapshot data
+    if (this.ui && this.ui.hud) {
+      const lp = snap.players.find(p => p.id === this.localPlayerId);
+      if (lp) {
+        this.ui.hud.updateVitals({ hp: lp.hp, maxHp: lp.maxHp, mana: lp.mana, maxMana: lp.maxMana });
+        if (this.ui.screens) {
+          if (lp.isDowned && !this.ui.screens.death.isOpen) {
+            this.ui.screens.death.show({ floor: snap.floor ?? 1 });
+          } else if (!lp.isDowned && this.ui.screens.death.isOpen) {
+            this.ui.screens.death.hide();
+          }
+        }
+      }
+    }
+
     const questTextEl = document.getElementById('hud-quest-text');
     if (questTextEl) {
       const seals = snap.sanctumSealsRemaining ?? 2;
@@ -1293,6 +1368,13 @@ class GameApp {
     if (this.audio) this.audio.setMusicMode('boss');
     bossHud.classList.remove('hidden');
     document.getElementById('boss-name').innerText = boss.name;
+    // UI overhaul track: toast on real boss phase transitions
+    if (this.ui && this.ui.hud && boss.phase !== this._lastBossPhase) {
+      if (this._lastBossPhase !== undefined) {
+        this.ui.hud.toast(`Malakor — Phase ${boss.phase}`, 'red');
+      }
+      this._lastBossPhase = boss.phase;
+    }
     const seals = boss.sealsRemaining ?? 2;
     const sealTag = seals > 0 ? `🛡️ ${seals} SEAL${seals > 1 ? 'S' : ''} (${seals * 25}% WARD)` : '🔓 UNSEALED (+20% DMG)';
     document.getElementById('boss-phase-tag').innerText = `PHASE ${boss.phase} • ${sealTag} ${boss.isEnraged ? '🔥 ENRAGED' : ''}`;
@@ -1462,6 +1544,10 @@ class GameApp {
     this.combat.update(dt);
     this.loot.update(dt);
     this.entities.update(dt);
+    // levels track: biome atmosphere tick (fog, torch flicker, particles)
+    if (this.dungeon && typeof this.dungeon.update === 'function') {
+      this.dungeon.update(dt, time * 0.001);
+    }
 
     // Update Camera Target (Follow local player)
     let localMesh = this.entities.playerMeshes.get(this.localPlayerId);
