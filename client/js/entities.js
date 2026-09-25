@@ -8,12 +8,17 @@ import { enableCharacterLightLayer, attachBlobShadow, updateCharacterLighting } 
 // Phase 2 (workstream 2): game-wide animation state machine (Mixamo clips + procedural fallback).
 import { createAnimator } from './animation/AnimationStates.js';
 import { loadClipSet, HERO_STATE_PREFIX_OVERRIDES } from './animation/MixamoRig.js';
+// Phase 3 (workstream 6): cosmetic shop renderers (skins, weapon glows, emotes).
+import { syncPlayerCosmetics, playEmote } from './cosmetics.js?v=9.0';
 
 export class EntityManager {
   constructor(scene) {
     this.scene = scene;
     this.gltfLoader = new GLTFLoader();
     this.glbCache = {};
+    // Phase 3 cosmetic shop: id -> public catalog def, set by CosmeticShopUI
+    // after /api/stripe/config loads. Used for skin/glow/emote rendering.
+    this.cosmeticDefs = new Map();
     this.playerMeshes = new Map();
     this.mobMeshes = new Map();
     this.bossMesh = null;
@@ -228,6 +233,10 @@ export class EntityManager {
         }
       }
 
+      // Phase 3 cosmetic shop: hero skin + weapon glow (local + remote players).
+      // Idempotent — only re-tints when the snapshot's cosmetic ids change.
+      syncPlayerCosmetics(group, p.skinId || null, p.weaponGlow || null, this.cosmeticDefs);
+
       // Toggle Soul Overdrive (4+ Kill Streak) Blazing Floor Ring
       if (p.overdrive) {
         if (!group.userData.overdriveRing) {
@@ -336,6 +345,29 @@ export class EntityManager {
         triggerAttackLunge(group); // characters track: root forward lunge
       }
     }
+  }
+
+  // Phase 3 cosmetic shop: play a purchased emote on any hero (local or
+  // remote). The emote def comes from the server's public catalog; unknown
+  // ids are ignored so forged messages render nothing.
+  triggerEmote(playerId, emoteId) {
+    const group = this.playerMeshes.get(playerId);
+    if (!group || !group.userData) return;
+    const def = this.cosmeticDefs.get(emoteId);
+    if (def && def.kind === 'emote') {
+      playEmote(group, def);
+    }
+  }
+
+  // Phase 3 cosmetic shop: force-apply equipped cosmetics to a hero group
+  // immediately (used right after an equip; the snapshot re-sync covers the
+  // steady state).
+  applyCosmeticsNow(playerId, skinId, weaponGlowId) {
+    const group = this.playerMeshes.get(playerId);
+    if (!group || !group.userData) return;
+    delete group.userData._activeSkinId;
+    delete group.userData._activeWeaponGlowId;
+    syncPlayerCosmetics(group, skinId || null, weaponGlowId || null, this.cosmeticDefs);
   }
 
   // --- AAA CLASS-UNIQUE ARTICULATED 3D HERO MODELS ---
@@ -701,6 +733,8 @@ export class EntityManager {
       chestGroup,
       leftArm,
       rightArm,
+      // Phase 3 cosmetic shop: mainhand weapon group, for weapon-glow retinting.
+      weaponGroup: (rightArm.userData && rightArm.userData.weapon) || null,
       cape,
       angelWings,
       classOrbiters,
@@ -959,7 +993,10 @@ export class EntityManager {
       rogue: 0x5a2d8a,
       mage: 0x1d5fb0,
       ranger: 0x2c7e3a,
-      necromancer: 0x187046
+      necromancer: 0x187046,
+      plaguecaller: 0x6d9416,
+      gravewarden: 0x4a5a68,
+      hexblade: 0x8e1c58
     };
     return colors[classKey] || 0x777777;
   }
@@ -971,7 +1008,10 @@ export class EntityManager {
       rogue: 0xaa44ff,
       mage: 0x33aaff,
       ranger: 0x44ee66,
-      necromancer: 0x00ff88
+      necromancer: 0x00ff88,
+      plaguecaller: 0xaaff33,
+      gravewarden: 0x9fb4c8,
+      hexblade: 0xff4d9d
     };
     return colors[classKey] || 0xffffff;
   }
@@ -983,7 +1023,10 @@ export class EntityManager {
       rogue: 0x1a0f26,
       mage: 0x0d1f42,
       ranger: 0x1b3614,
-      necromancer: 0x0a2417
+      necromancer: 0x0a2417,
+      plaguecaller: 0x2a3311,
+      gravewarden: 0x1a2027,
+      hexblade: 0x2b0f1e
     };
     return colors[classKey] || 0x333333;
   }

@@ -6,6 +6,37 @@ const crypto = require('crypto');
 const DATA_DIR = path.join(__dirname, 'data');
 const ACCOUNTS_FILE = path.join(DATA_DIR, 'accounts.json');
 
+// Canonical persistent-account meta-progression schema (see
+// server/game/systems/MetaProgression.js for the full contract). Rank is
+// DERIVED from accountXp and never stored.
+function defaultMeta() {
+  return {
+    accountXp: 0,
+    seals: 0,               // spendable covenant currency, earned from runs
+    unlockedClasses: [],    // unlockable hero class keys (plaguecaller, ...)
+    unlockedBoons: [],      // owned starting-boon ids
+    activeBoons: [],        // equipped run-start boons (max 2)
+    stashTabs: 0,           // extra stash tabs beyond the first
+    lifetimeRuns: 0,
+    lifetimeVictories: 0
+  };
+}
+
+function ensureMetaOnProfile(profile) {
+  if (!profile || typeof profile !== 'object') return;
+  if (!profile.meta || typeof profile.meta !== 'object') profile.meta = defaultMeta();
+  const m = profile.meta;
+  if (typeof m.accountXp !== 'number' || m.accountXp < 0) m.accountXp = 0;
+  if (typeof m.seals !== 'number' || m.seals < 0) m.seals = 0;
+  if (!Array.isArray(m.unlockedClasses)) m.unlockedClasses = [];
+  if (!Array.isArray(m.unlockedBoons)) m.unlockedBoons = [];
+  if (!Array.isArray(m.activeBoons)) m.activeBoons = [];
+  if (typeof m.stashTabs !== 'number' || m.stashTabs < 0) m.stashTabs = 0;
+  if (typeof m.lifetimeRuns !== 'number' || m.lifetimeRuns < 0) m.lifetimeRuns = 0;
+  if (typeof m.lifetimeVictories !== 'number' || m.lifetimeVictories < 0) m.lifetimeVictories = 0;
+}
+const catalog = require('./cosmeticsCatalog');
+
 class AuthService {
   constructor() {
     if (!fs.existsSync(DATA_DIR)) {
@@ -23,6 +54,10 @@ class AuthService {
         this.accounts = JSON.parse(raw);
         for (const [uname, acc] of Object.entries(this.accounts)) {
           if (acc.token) this.tokens[acc.token] = uname;
+          if (acc.profile) {
+            this.sanitizeProfile(acc.profile);
+            ensureMetaOnProfile(acc.profile);
+          }
         }
       }
     } catch (e) {
@@ -33,7 +68,11 @@ class AuthService {
 
   saveAccounts() {
     try {
-      fs.writeFileSync(ACCOUNTS_FILE, JSON.stringify(this.accounts, null, 2), 'utf8');
+      // Atomic write: temp file + rename so a crash mid-save never corrupts
+      // accounts.json (entitlements must survive restarts intact).
+      const tmp = `${ACCOUNTS_FILE}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.accounts, null, 2), 'utf8');
+      fs.renameSync(tmp, ACCOUNTS_FILE);
     } catch (e) {
       console.error('[AuthService] Failed to save accounts:', e.message);
     }
@@ -61,6 +100,13 @@ class AuthService {
       equippedItem: null,
       inventory: [],
       purchasedBundles: [],
+      // Covenant Cosmetic Shop entitlements (Stripe, cosmetics-only).
+      ownedSkins: [],
+      ownedWeaponGlows: [],
+      ownedEmotes: [],
+      equippedSkin: null,
+      equippedWeaponGlow: null,
+      meta: defaultMeta(), // persistent account progression (ranks, unlocks)
       stats: {
         kills: 0,
         bossesSlain: 0,
@@ -69,6 +115,17 @@ class AuthService {
       },
       createdAt: new Date().toISOString()
     };
+  }
+
+  // Backfill cosmetic entitlement fields on profiles created before the shop.
+  sanitizeProfile(p) {
+    if (!p) return p;
+    if (!Array.isArray(p.ownedSkins)) p.ownedSkins = [];
+    if (!Array.isArray(p.ownedWeaponGlows)) p.ownedWeaponGlows = [];
+    if (!Array.isArray(p.ownedEmotes)) p.ownedEmotes = [];
+    if (p.equippedSkin !== null && typeof p.equippedSkin !== 'string') p.equippedSkin = null;
+    if (p.equippedWeaponGlow !== null && typeof p.equippedWeaponGlow !== 'string') p.equippedWeaponGlow = null;
+    return p;
   }
 
   register(username, password) {
@@ -121,6 +178,22 @@ class AuthService {
     return this.accounts[uname]?.profile || null;
   }
 
+  // Phase 3 meta-progression: resolve the full account record (username +
+  // profile) from a session token. Used to link run players to accounts
+  // server-side — never trust a client-supplied username.
+  getAccountByToken(token) {
+    if (!token || !this.tokens[token]) return null;
+    const username = this.tokens[token];
+    const acc = this.accounts[username];
+    if (!acc) return null;
+    return { username, profile: acc.profile };
+  }
+
+  getProfileByUsername(username) {
+    const uname = (username || '').toLowerCase();
+    return this.accounts[uname]?.profile || null;
+  }
+
   updateProfile(token, updates = {}) {
     const uname = this.tokens[token];
     if (!uname || !this.accounts[uname]) return null;
@@ -148,83 +221,87 @@ class AuthService {
     return p;
   }
 
-  grantStripePurchaseToAccount(tokenOrUsername, productId) {
-    let uname = this.tokens[tokenOrUsername] || (tokenOrUsername || '').toLowerCase();
-    if (!this.accounts[uname]) {
-      // If guest or no token provided, apply to most recently active account if available
-      const keys = Object.keys(this.accounts);
-      if (keys.length > 0) uname = keys[keys.length - 1];
+  // Grant a cosmetic-shop purchase to an account. Called ONLY after Stripe
+  // confirms payment (signature-verified webhook or verified session retrieval).
+  // Grants are cosmetics-only: the product's grant lists are validated against
+  // the catalog, so a forged productId can never award stats, shards, or gear.
+  // Idempotent: re-granting an already-owned cosmetic is a no-op success.
+  grantCosmeticEntitlement(accountToken, productId) {
+    const uname = this.tokens[accountToken];
+    if (!uname || !this.accounts[uname]) {
+      return { ok: false, error: 'Account not found. Please sign in again.' };
     }
-    const acc = this.accounts[uname];
-    if (!acc) return null;
+    const product = catalog.getProduct(productId);
+    if (!product) {
+      return { ok: false, error: 'Unknown product.' };
+    }
 
-    const p = acc.profile;
-    if (!p.unlockedAuras) p.unlockedAuras = [];
+    const acc = this.accounts[uname];
+    const p = this.sanitizeProfile(acc.profile);
+    let newlyGranted = 0;
+    const addUnique = (arr, id) => {
+      if (!arr.includes(id)) { arr.push(id); newlyGranted++; }
+    };
+    for (const s of product.grants.skins) addUnique(p.ownedSkins, s);
+    for (const g of product.grants.weaponGlows) addUnique(p.ownedWeaponGlows, g);
+    for (const e of product.grants.emotes) addUnique(p.ownedEmotes, e);
+
     if (!p.purchasedBundles) p.purchasedBundles = [];
     if (!p.purchasedBundles.includes(productId)) p.purchasedBundles.push(productId);
 
-    if (productId === 'starter_pack') {
-      p.shards = (p.shards || 0) + 500;
-      if (!p.unlockedAuras.includes('infernal')) p.unlockedAuras.push('infernal');
-      p.cosmeticAura = 'infernal';
-      p.title = 'Hellfire Warlord';
-      p.equippedItem = {
-        id: 'iap_hellfire_cleaver',
-        name: 'Hellfire Warlord Great-Blade (IAP)',
-        slot: 'weapon',
-        rarity: 'Legendary',
-        color: '#ffaa00',
-        beamColor: 0xffaa00,
-        gearScore: 680,
-        stats: { attackPower: 45, maxHp: 180, critChance: 0.15, lifesteal: 0.10, cooldownHaste: 0.12 }
-      };
-      p.gearScore = Math.max(p.gearScore || 100, 680);
-    } else if (productId === 'founder_pass') {
-      p.shards = (p.shards || 0) + 1500;
-      if (!p.unlockedAuras.includes('sovereign')) p.unlockedAuras.push('sovereign');
-      p.cosmeticAura = 'sovereign';
-      p.title = 'Sovereign Ascendant';
-      p.mightRank = (p.mightRank || 0) + 1;
-      p.vitalityRank = (p.vitalityRank || 0) + 1;
-      p.hasteRank = (p.hasteRank || 0) + 1;
-      p.equippedItem = {
-        id: 'iap_sovereign_relicblade',
-        name: 'Sovereign Seraph Relic-Blade (IAP)',
-        slot: 'weapon',
-        rarity: 'Mythic Covenant',
-        color: '#ff2255',
-        beamColor: 0xff2255,
-        gearScore: 1150,
-        stats: { attackPower: 85, maxHp: 350, critChance: 0.25, lifesteal: 0.18, cooldownHaste: 0.20, moveSpeed: 1.5 }
-      };
-      p.gearScore = Math.max(p.gearScore || 100, 1150);
-    } else if (productId === 'mythic_3d_arsenal') {
-      p.shards = (p.shards || 0) + 3500;
-      ['infernal', 'frost', 'void', 'sovereign'].forEach(a => {
-        if (!p.unlockedAuras.includes(a)) p.unlockedAuras.push(a);
-      });
-      p.cosmeticAura = 'sovereign';
-      p.title = 'Grand Architect of the Covenant';
-      p.mightRank = (p.mightRank || 0) + 2;
-      p.vitalityRank = (p.vitalityRank || 0) + 2;
-      p.hasteRank = (p.hasteRank || 0) + 2;
-      p.equippedItem = {
-        id: 'iap_godslayer_scythe',
-        name: "Malakor's Godslayer Astral Scythe (IAP)",
-        slot: 'weapon',
-        rarity: 'Mythic Covenant',
-        color: '#ff2255',
-        beamColor: 0xff2255,
-        gearScore: 1650,
-        stats: { attackPower: 140, maxHp: 600, critChance: 0.35, lifesteal: 0.25, cooldownHaste: 0.30, moveSpeed: 2.2 }
-      };
-      p.gearScore = Math.max(p.gearScore || 100, 1650);
-    } else if (productId === 'shard_vault_3000') {
-      p.shards = (p.shards || 0) + 3000;
+    // Auto-equip newly granted cosmetics when the slot is empty, so the
+    // purchase is visible immediately. Never overwrites an existing choice.
+    if (product.grants.skins.length && !p.equippedSkin) {
+      p.equippedSkin = product.grants.skins[0];
+    }
+    if (product.grants.weaponGlows.length && !p.equippedWeaponGlow) {
+      p.equippedWeaponGlow = product.grants.weaponGlows[0];
     }
 
     this.saveAccounts();
-    return p;
+    return { ok: true, alreadyOwned: newlyGranted === 0, entitlements: this.getEntitlements(accountToken) };
+  }
+
+  // Read-only view of a token's cosmetic entitlements (safe for the client).
+  getEntitlements(accountToken) {
+    const profile = this.getProfileByToken(accountToken);
+    if (!profile) return null;
+    const p = this.sanitizeProfile(profile);
+    return {
+      ownedSkins: [...p.ownedSkins],
+      ownedWeaponGlows: [...p.ownedWeaponGlows],
+      ownedEmotes: [...p.ownedEmotes],
+      equippedSkin: p.equippedSkin,
+      equippedWeaponGlow: p.equippedWeaponGlow
+    };
+  }
+
+  // Equip a cosmetic the account owns (or null to unequip). Ownership is
+  // validated server-side against the persisted profile — clients cannot
+  // equip what they have not bought.
+  setEquippedCosmetic(accountToken, kind, cosmeticId) {
+    const uname = this.tokens[accountToken];
+    if (!uname || !this.accounts[uname]) {
+      return { ok: false, error: 'Account not found. Please sign in again.' };
+    }
+    const p = this.sanitizeProfile(this.accounts[uname].profile);
+
+    if (kind === 'skin') {
+      if (cosmeticId !== null && !p.ownedSkins.includes(cosmeticId)) {
+        return { ok: false, error: 'You do not own that skin.' };
+      }
+      p.equippedSkin = cosmeticId;
+    } else if (kind === 'weaponGlow') {
+      if (cosmeticId !== null && !p.ownedWeaponGlows.includes(cosmeticId)) {
+        return { ok: false, error: 'You do not own that weapon glow.' };
+      }
+      p.equippedWeaponGlow = cosmeticId;
+    } else {
+      return { ok: false, error: 'Unknown cosmetic kind.' };
+    }
+
+    this.saveAccounts();
+    return { ok: true, entitlements: this.getEntitlements(accountToken) };
   }
 }
 

@@ -1,12 +1,37 @@
-// server/stripeService.js - Live Stripe Checkout, Webhook Verification & Character Item Fulfillment
+// server/stripeService.js — Stripe Checkout for the Covenant COSMETIC SHOP.
+//
+// COSMETICS ONLY — NEVER PAY-TO-WIN. This service sells hero skins, weapon glow
+// effects, and emotes. It grants zero gameplay stats: no attack, no HP, no XP,
+// no loot luck, no blessings, no shards. The catalog lives in
+// server/cosmeticsCatalog.js, which is the single source of truth.
+//
+// Security model:
+//  - Stripe keys come ONLY from process.env (STRIPE_SECRET_KEY,
+//    STRIPE_WEBHOOK_SECRET, STRIPE_PUBLISHABLE_KEY). This file contains
+//    placeholders/empty defaults only — never real keys.
+//  - Entitlements are granted ONLY after Stripe confirms payment, via either:
+//      (a) a signature-verified checkout.session.completed webhook, or
+//      (b) a server-side session retrieval proving payment_status === 'paid'.
+//  - Nothing is granted at checkout-session creation time. Forged session ids,
+//    unknown product ids, and account-token mismatches are all rejected.
+//  - Granted sessions are recorded in server/data/stripeSessions.json
+//    (atomic writes) so a session can never grant twice (replay protection).
+//  - With no keys configured the shop reports "coming soon"; checkout creation
+//    refuses cleanly and the game is fully playable.
+
 const fs = require('fs');
 const path = require('path');
 const https = require('https');
+const crypto = require('crypto');
 const authService = require('./authService');
+const catalog = require('./cosmeticsCatalog');
 
 const ENV_PATH = path.join(__dirname, '..', '.env');
 const ENV_TXT_PATH = path.join(__dirname, '..', '.env.txt');
 
+// Local-testing convenience: load a gitignored .env / .env.txt into
+// process.env (never overwrites real env vars). Real keys are never printed
+// or committed.
 function loadEnvFile(filePath) {
   try {
     if (fs.existsSync(filePath)) {
@@ -33,135 +58,158 @@ function loadEnvFile(filePath) {
 loadEnvFile(ENV_PATH);
 loadEnvFile(ENV_TXT_PATH);
 
-const STRIPE_CATALOG = {
-  starter_pack: {
-    id: 'starter_pack',
-    name: 'Vanguard Starter Pack (500 Soul Shards + 3D Infernal Demon-Crown + Hellfire Great-Blade)',
-    description: 'Instantly grants +500 Soul Shards, the 3D Infernal Demon-Crown Aura, and equips the Legendary Hellfire Warlord Great-Blade (GS 680: +45 ATK, +180 HP, +15% CRIT, +10% Lifesteal).',
-    amountCents: 299,
-    currency: 'usd',
-    shards: 500,
-    aura: 'infernal',
-    title: 'Hellfire Warlord',
-    blessings: { might: 0, vitality: 0, haste: 0 },
-    equippedItem: {
-      id: 'iap_hellfire_cleaver',
-      name: 'Hellfire Warlord Great-Blade (IAP)',
-      slot: 'weapon',
-      rarity: 'Legendary',
-      color: '#ffaa00',
-      beamColor: 0xffaa00,
-      gearScore: 680,
-      stats: { attackPower: 45, maxHp: 180, critChance: 0.15, lifesteal: 0.10, cooldownHaste: 0.12 }
-    }
-  },
-  founder_pass: {
-    id: 'founder_pass',
-    name: "Founder's Sovereign Pass (1,500 Shards + 3D Seraph Wings + Sovereign Relic-Blade + All Blessings +1)",
-    description: 'Unlocks 1,500 Soul Shards, 3D Golden Seraph Wings, +1 Rank to ALL Soul Blessings, and equips the Mythic Sovereign Seraph Relic-Blade (GS 1150: +85 ATK, +350 HP, +25% CRIT, +18% Lifesteal).',
-    amountCents: 699,
-    currency: 'usd',
-    shards: 1500,
-    aura: 'sovereign',
-    title: 'Sovereign Ascendant',
-    blessings: { might: 1, vitality: 1, haste: 1 },
-    equippedItem: {
-      id: 'iap_sovereign_relicblade',
-      name: 'Sovereign Seraph Relic-Blade (IAP)',
-      slot: 'weapon',
-      rarity: 'Mythic Covenant',
-      color: '#ff2255',
-      beamColor: 0xff2255,
-      gearScore: 1150,
-      stats: { attackPower: 85, maxHp: 350, critChance: 0.25, lifesteal: 0.18, cooldownHaste: 0.20, moveSpeed: 1.5 }
-    }
-  },
-  mythic_3d_arsenal: {
-    id: 'mythic_3d_arsenal',
-    name: "Mythic 3D Arsenal Bundle (3,500 Shards + All 4 3D Auras + Malakor's Godslayer Scythe)",
-    description: "Unlocks all 4 3D Cosmetic Auras, 3,500 Soul Shards, +2 Ranks to ALL Soul Blessings, and equips Malakor's Godslayer Astral Scythe (GS 1650: +140 ATK, +600 HP, +35% CRIT, +25% Lifesteal, +30% Haste).",
-    amountCents: 999,
-    currency: 'usd',
-    shards: 3500,
-    aura: 'sovereign',
-    unlockAllAuras: true,
-    title: 'Grand Architect of the Covenant',
-    blessings: { might: 2, vitality: 2, haste: 2 },
-    equippedItem: {
-      id: 'iap_godslayer_scythe',
-      name: "Malakor's Godslayer Astral Scythe (IAP)",
-      slot: 'weapon',
-      rarity: 'Mythic Covenant',
-      color: '#ff2255',
-      beamColor: 0xff2255,
-      gearScore: 1650,
-      stats: { attackPower: 140, maxHp: 600, critChance: 0.35, lifesteal: 0.25, cooldownHaste: 0.30, moveSpeed: 2.2 }
-    }
-  },
-  shard_vault_3000: {
-    id: 'shard_vault_3000',
-    name: 'Sovereign Treasury Chest (3,000 Soul Shards)',
-    description: 'Massive treasury of 3,000 Soul Shards to max out permanent Account Soul-Tree Blessings and 3D Auras.',
-    amountCents: 1499,
-    currency: 'usd',
-    shards: 3000,
-    aura: null,
-    title: null,
-    blessings: { might: 0, vitality: 0, haste: 0 },
-    equippedItem: null
-  }
+const DATA_DIR = path.join(__dirname, 'data');
+const SESSIONS_FILE = path.join(DATA_DIR, 'stripeSessions.json');
+const WEBHOOK_TOLERANCE_SEC = 300; // 5 minutes, per Stripe's recommendation
+
+// Placeholder / empty defaults only. Real keys live in process.env.
+const KEY_DEFAULTS = {
+  STRIPE_SECRET_KEY: '',
+  STRIPE_PUBLISHABLE_KEY: '',
+  STRIPE_WEBHOOK_SECRET: ''
 };
 
 class StripeService {
+  constructor() {
+    this.grantedSessions = this._loadGrantedSessions();
+  }
+
+  // --- Key access (env only; never real values in code) --------------------
   getSecretKey() {
-    const key = (process.env.STRIPE_API_KEY || process.env.STRIPE_SECRET_KEY || '').trim();
+    const key = (process.env.STRIPE_SECRET_KEY || KEY_DEFAULTS.STRIPE_SECRET_KEY || '').trim();
     if (key.startsWith('sk_live_') || key.startsWith('sk_test_') || key.startsWith('rk_')) {
       return key;
     }
     return '';
   }
 
+  getPublishableKey() {
+    // Publishable keys are safe to expose to the browser by design.
+    const key = (process.env.STRIPE_PUBLISHABLE_KEY || KEY_DEFAULTS.STRIPE_PUBLISHABLE_KEY || '').trim();
+    if (key.startsWith('pk_live_') || key.startsWith('pk_test_')) {
+      return key;
+    }
+    return '';
+  }
+
   getWebhookSecret() {
-    return (process.env.STRIPE_WEBHOOK_SECRET || '').trim();
+    return (process.env.STRIPE_WEBHOOK_SECRET || KEY_DEFAULTS.STRIPE_WEBHOOK_SECRET || '').trim();
+  }
+
+  isConfigured() {
+    return Boolean(this.getSecretKey());
   }
 
   getBaseUrl(originOverride) {
     return originOverride || process.env.BASE_URL || 'http://localhost:3000';
   }
 
-  getConfigStatus() {
+  getMode() {
     const sk = this.getSecretKey();
+    if (!sk) return 'unconfigured';
+    return sk.startsWith('sk_live_') ? 'live' : 'test';
+  }
+
+  getConfigStatus() {
     return {
-      stripeConfigured: Boolean(sk),
+      // Shop availability flag the client uses for its "coming soon" state.
+      shopAvailable: this.isConfigured(),
+      stripeConfigured: this.isConfigured(),
       webhookConfigured: Boolean(this.getWebhookSecret()),
-      mode: sk.startsWith('sk_live_') ? 'live' : (sk ? 'test' : 'sandbox_fallback'),
-      catalog: STRIPE_CATALOG
+      mode: this.getMode(),
+      publishableKey: this.getPublishableKey(),
+      catalog: catalog.publicCatalog()
     };
   }
 
-  getRewardPackage(productId) {
-    return STRIPE_CATALOG[productId] || STRIPE_CATALOG.founder_pass;
+  // --- Replay protection ---------------------------------------------------
+  _loadGrantedSessions() {
+    try {
+      if (fs.existsSync(SESSIONS_FILE)) {
+        const raw = JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+        if (raw && typeof raw === 'object') return raw;
+      }
+    } catch (e) {
+      console.warn('[StripeService] Could not load granted sessions:', e.message);
+    }
+    return {};
   }
 
-  async createCheckoutSession({ productId, originUrl, playerName, accountToken }) {
-    const product = this.getRewardPackage(productId);
+  _saveGrantedSessions() {
+    try {
+      if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+      const tmp = `${SESSIONS_FILE}.${process.pid}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(this.grantedSessions, null, 2), 'utf8');
+      fs.renameSync(tmp, SESSIONS_FILE); // atomic on POSIX
+    } catch (e) {
+      console.error('[StripeService] Failed to persist granted sessions:', e.message);
+    }
+  }
+
+  hasGrantedSession(sessionId) {
+    return Boolean(sessionId && this.grantedSessions[sessionId]);
+  }
+
+  _recordGrantedSession(sessionId, record) {
+    this.grantedSessions[sessionId] = {
+      ...record,
+      grantedAt: new Date().toISOString()
+    };
+    this._saveGrantedSessions();
+  }
+
+  // --- Stripe HTTPS helper ---------------------------------------------------
+  _stripeRequest({ method, path, postData, idempotencyKey }) {
     const secretKey = this.getSecretKey();
-    const baseUrl = this.getBaseUrl(originUrl);
-
-    // Immediately record reward on account so returning from Stripe or instant fulfillment always equips the item
-    const updatedProfile = authService.grantStripePurchaseToAccount(accountToken || playerName, product.id);
-
-    if (!secretKey) {
-      return {
-        mode: 'instant_sandbox',
-        sessionId: `cov_sandbox_${Date.now()}`,
-        product,
-        updatedProfile,
-        checkoutUrl: `${baseUrl}/?stripe_success=1&product_id=${encodeURIComponent(product.id)}&session_id=cov_sandbox_${Date.now()}`
+    return new Promise((resolve, reject) => {
+      const headers = {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
       };
+      if (postData) headers['Content-Length'] = Buffer.byteLength(postData);
+      if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey;
+      const req = https.request(
+        { hostname: 'api.stripe.com', port: 443, path, method, headers },
+        (res) => {
+          let body = '';
+          res.on('data', chunk => (body += chunk));
+          res.on('end', () => {
+            try {
+              const parsed = JSON.parse(body);
+              if (res.statusCode >= 200 && res.statusCode < 300) {
+                resolve(parsed);
+              } else {
+                reject(new Error(parsed.error?.message || `Stripe API error ${res.statusCode}`));
+              }
+            } catch (e) {
+              reject(new Error(`Stripe API returned non-JSON (${res.statusCode})`));
+            }
+          });
+        }
+      );
+      req.on('error', reject);
+      req.setTimeout(15000, () => req.destroy(new Error('Stripe API request timed out')));
+      if (postData) req.write(postData);
+      req.end();
+    });
+  }
+
+  // --- Checkout session creation ---------------------------------------------
+  // Creates a REAL Stripe Checkout session. Grants NOTHING — fulfillment
+  // happens only after Stripe confirms payment (webhook or verifySession).
+  async createCheckoutSession({ productId, originUrl, playerName, accountToken }) {
+    const product = catalog.getProduct(productId);
+    if (!product) {
+      throw new Error('Unknown product. The cosmetic shop catalog changed — please refresh.');
+    }
+    if (!this.isConfigured()) {
+      const err = new Error('Stripe is not configured yet — the cosmetic shop is coming soon.');
+      err.code = 'STRIPE_NOT_CONFIGURED';
+      throw err;
     }
 
-    const successUrl = `${baseUrl}/?stripe_success=1&product_id=${encodeURIComponent(product.id)}&session_id={CHECKOUT_SESSION_ID}`;
+    const baseUrl = this.getBaseUrl(originUrl);
+    const successUrl = `${baseUrl}/?stripe_success=1&session_id={CHECKOUT_SESSION_ID}`;
     const cancelUrl = `${baseUrl}/?stripe_cancel=1`;
 
     const params = new URLSearchParams();
@@ -170,8 +218,8 @@ class StripeService {
     params.append('cancel_url', cancelUrl);
     params.append('line_items[0][price_data][currency]', product.currency);
     params.append('line_items[0][price_data][unit_amount]', String(product.amountCents));
-    params.append('line_items[0][price_data][product_data][name]', product.name);
-    params.append('line_items[0][price_data][product_data][description]', product.description);
+    params.append('line_items[0][price_data][product_data][name]', `Dungeon of the Covenant — ${product.name}`);
+    params.append('line_items[0][price_data][product_data][description]', `${product.description} (Cosmetic only — never pay-to-win.)`);
     params.append('line_items[0][quantity]', '1');
     params.append('metadata[productId]', product.id);
     params.append('metadata[playerName]', playerName || 'Hero');
@@ -180,76 +228,201 @@ class StripeService {
       params.append('metadata[accountToken]', accountToken);
     }
 
-    const postData = params.toString();
+    // Idempotency: one session per (account, product, 10-minute window).
+    const idemKey = crypto
+      .createHash('sha256')
+      .update(`cov-shop|${accountToken || 'guest'}|${product.id}|${Math.floor(Date.now() / 600000)}`)
+      .digest('hex');
 
-    return new Promise((resolve) => {
-      const req = https.request(
-        {
-          hostname: 'api.stripe.com',
-          port: 443,
-          path: '/v1/checkout/sessions',
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${secretKey}`,
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Content-Length': Buffer.byteLength(postData)
-          }
-        },
-        (res) => {
-          let body = '';
-          res.on('data', chunk => (body += chunk));
-          res.on('end', () => {
-            try {
-              const parsed = JSON.parse(body);
-              if (res.statusCode >= 200 && res.statusCode < 300 && parsed.url) {
-                resolve({
-                  mode: 'stripe_live',
-                  sessionId: parsed.id,
-                  checkoutUrl: parsed.url,
-                  product,
-                  updatedProfile
-                });
-              } else {
-                resolve({
-                  mode: 'instant_sandbox_fallback',
-                  stripeError: parsed.error?.message || 'Stripe session fallback',
-                  sessionId: `cov_fallback_${Date.now()}`,
-                  product,
-                  updatedProfile,
-                  checkoutUrl: `${baseUrl}/?stripe_success=1&product_id=${encodeURIComponent(product.id)}`
-                });
-              }
-            } catch (e) {
-              resolve({
-                mode: 'instant_sandbox_fallback',
-                sessionId: `cov_fallback_${Date.now()}`,
-                product,
-                updatedProfile
-              });
-            }
-          });
-        }
-      );
-
-      req.on('error', (err) => {
-        resolve({
-          mode: 'instant_sandbox_fallback',
-          stripeError: err.message,
-          sessionId: `cov_fallback_${Date.now()}`,
-          product,
-          updatedProfile
-        });
-      });
-
-      req.write(postData);
-      req.end();
+    const session = await this._stripeRequest({
+      method: 'POST',
+      path: '/v1/checkout/sessions',
+      postData: params.toString(),
+      idempotencyKey: idemKey
     });
+
+    if (!session || !session.url || !session.id) {
+      throw new Error('Stripe did not return a checkout URL. Please try again.');
+    }
+
+    return {
+      mode: this.getMode() === 'live' ? 'stripe_live' : 'stripe_test',
+      sessionId: session.id,
+      checkoutUrl: session.url,
+      product: {
+        id: product.id,
+        name: product.name,
+        priceDisplay: catalog.formatPrice(product.amountCents)
+      }
+    };
   }
 
-  async verifySession(sessionId, productId, accountToken) {
-    const product = this.getRewardPackage(productId);
-    const updatedProfile = authService.grantStripePurchaseToAccount(accountToken, product.id);
-    return { verified: true, product, updatedProfile };
+  // --- Session verification (checkout return path) -----------------------------
+  // Server-side truth: retrieves the session from Stripe and requires
+  // payment_status === 'paid' before granting. Forged session ids, unpaid
+  // sessions, product mismatches, and account-token mismatches are rejected.
+  async verifySession(sessionId, accountToken) {
+    if (!sessionId || typeof sessionId !== 'string' || !sessionId.startsWith('cs_')) {
+      return { verified: false, error: 'Invalid checkout session.' };
+    }
+    if (!this.isConfigured()) {
+      return { verified: false, error: 'Stripe is not configured.' };
+    }
+    if (this.hasGrantedSession(sessionId)) {
+      // Already fulfilled (e.g. webhook beat us here) — report success,
+      // idempotently, without granting twice.
+      const rec = this.grantedSessions[sessionId];
+      return { verified: true, alreadyGranted: true, productId: rec.productId };
+    }
+
+    let session;
+    try {
+      session = await this._stripeRequest({
+        method: 'GET',
+        path: `/v1/checkout/sessions/${encodeURIComponent(sessionId)}`
+      });
+    } catch (e) {
+      return { verified: false, error: 'Could not verify payment with Stripe. Please try again.' };
+    }
+
+    if (!session || session.payment_status !== 'paid') {
+      return { verified: false, error: 'Payment not completed for this session.' };
+    }
+
+    const productId = session.metadata?.productId;
+    const product = catalog.getProduct(productId);
+    if (!product) {
+      return { verified: false, error: 'Session references an unknown product.' };
+    }
+
+    // The session must belong to the account claiming it.
+    const sessionAccount = session.client_reference_id || session.metadata?.accountToken || '';
+    if (accountToken && sessionAccount && sessionAccount !== accountToken) {
+      return { verified: false, error: 'This purchase belongs to a different account.' };
+    }
+    const grantToken = accountToken || sessionAccount;
+    if (!grantToken) {
+      return { verified: false, error: 'No account is signed in to receive this purchase.' };
+    }
+
+    const grant = authService.grantCosmeticEntitlement(grantToken, product.id);
+    if (!grant || !grant.ok) {
+      return { verified: false, error: grant?.error || 'Could not grant cosmetic to account.' };
+    }
+
+    this._recordGrantedSession(sessionId, {
+      productId: product.id,
+      accountToken: grantToken,
+      source: 'verify_session'
+    });
+
+    return { verified: true, productId: product.id, entitlements: grant.entitlements };
+  }
+
+  // --- Webhook signature verification ------------------------------------------
+  // Stripe-Signature: t=<timestamp>,v1=<hmac-sha256 hex of "t.payload">.
+  verifyWebhookSignature(rawBody, signatureHeader) {
+    const secret = this.getWebhookSecret();
+    if (!secret) {
+      return { ok: false, error: 'Webhook secret not configured.' };
+    }
+    if (!signatureHeader || !rawBody) {
+      return { ok: false, error: 'Missing webhook signature.' };
+    }
+
+    const parts = {};
+    for (const part of String(signatureHeader).split(',')) {
+      const [k, v] = part.split('=');
+      if (k && v) parts[k.trim()] = v.trim();
+    }
+    const timestamp = parseInt(parts.t || '', 10);
+    const signature = parts.v1 || '';
+    if (!timestamp || !signature) {
+      return { ok: false, error: 'Malformed webhook signature.' };
+    }
+
+    const age = Math.abs(Math.floor(Date.now() / 1000) - timestamp);
+    if (age > WEBHOOK_TOLERANCE_SEC) {
+      return { ok: false, error: 'Webhook signature timestamp outside tolerance.' };
+    }
+
+    const payload = Buffer.isBuffer(rawBody) ? rawBody : Buffer.from(rawBody, 'utf8');
+    const signedPayload = Buffer.concat([Buffer.from(`${timestamp}.`, 'utf8'), payload]);
+    const expected = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
+
+    let ok = false;
+    try {
+      ok = crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'));
+    } catch (e) {
+      ok = false;
+    }
+    if (!ok) {
+      return { ok: false, error: 'Webhook signature mismatch.' };
+    }
+    return { ok: true };
+  }
+
+  // --- Webhook event handling (post-signature-verification) ---------------------
+  async handleWebhookEvent(event) {
+    if (!event || typeof event !== 'object') {
+      return { received: false, error: 'Invalid event payload.' };
+    }
+
+    // Idempotency on the Stripe event id itself.
+    if (event.id && this.grantedSessions[`evt_${event.id}`]) {
+      return { received: true, duplicate: true };
+    }
+
+    if (event.type === 'checkout.session.completed') {
+      const sessionObj = event.data?.object;
+      if (!sessionObj) {
+        return { received: false, error: 'Missing session object.' };
+      }
+      if (sessionObj.payment_status !== 'paid') {
+        return { received: true, ignored: 'unpaid' };
+      }
+
+      const productId = sessionObj.metadata?.productId;
+      const product = catalog.getProduct(productId);
+      if (!product) {
+        console.warn(`[StripeService] Webhook for unknown product: ${productId}`);
+        return { received: true, ignored: 'unknown_product' };
+      }
+
+      const accountToken = sessionObj.client_reference_id || sessionObj.metadata?.accountToken || '';
+      if (!accountToken) {
+        console.warn('[StripeService] Webhook session has no account token; cannot grant.');
+        return { received: true, ignored: 'no_account' };
+      }
+
+      const sessionKey = sessionObj.id;
+      if (sessionKey && this.hasGrantedSession(sessionKey)) {
+        return { received: true, duplicate: true };
+      }
+
+      const grant = authService.grantCosmeticEntitlement(accountToken, product.id);
+      if (!grant || !grant.ok) {
+        console.warn('[StripeService] Webhook grant failed:', grant?.error);
+        return { received: true, ignored: 'grant_failed' };
+      }
+
+      if (sessionKey) {
+        this._recordGrantedSession(sessionKey, {
+          productId: product.id,
+          accountToken,
+          source: 'webhook'
+        });
+      }
+      if (event.id) {
+        this.grantedSessions[`evt_${event.id}`] = { grantedAt: new Date().toISOString(), source: 'webhook_event' };
+        this._saveGrantedSessions();
+      }
+      console.log(`[StripeService] Granted ${product.id} to account via webhook.`);
+      return { received: true, granted: product.id };
+    }
+
+    // Other event types are acknowledged but need no fulfillment.
+    return { received: true, ignored: event.type };
   }
 }
 
