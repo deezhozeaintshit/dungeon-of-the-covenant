@@ -1,0 +1,8 @@
+node_modules
+*.md
+*.zip
+.git
+tests
+tools
+mcp*.json
+game_asset_mcp*.json
