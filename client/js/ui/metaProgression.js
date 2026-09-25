@@ -112,8 +112,9 @@ export function initMetaProgression({
   function ensureLobbyChip() {
     const bar = document.getElementById('auth-account-summary');
     if (!bar || document.getElementById('meta-rank-chip')) return;
-    const chip = mk('span', '', { whiteSpace: 'nowrap' });
+    const chip = mk('span');
     chip.id = 'meta-rank-chip';
+    chip.className = 'account-chip'; // wraps inside the bar; see .account-bar-summary .account-chip
     chip.innerHTML = `🕯️ Rank: <strong id="meta-rank-name">—</strong> <span id="meta-rank-xp" class="meta-dim"></span> &nbsp;•&nbsp; 🔏 Seals: <strong id="meta-seals-balance">0</strong>`;
     bar.appendChild(chip);
   }

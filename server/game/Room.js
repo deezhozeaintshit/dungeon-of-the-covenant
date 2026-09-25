@@ -932,6 +932,28 @@ class Room {
         z: player.z,
         style: 'combo'
       });
+    } else if (cmd === 'claim_chest') {
+      // TAP TO CLAIM for the boss's epic relic chest (walk-over pickup in
+      // updateFloorLoot is the fallback). Humans only; must be within 12m.
+      if (player.isBot) return;
+      let nearest = null;
+      let nearestD = Infinity;
+      for (const loot of this.floorLoot) {
+        if (loot.pickedUp || loot.type !== 'epic_chest') continue;
+        const d = Math.hypot(loot.x - player.x, loot.z - player.z);
+        if (d < nearestD) { nearestD = d; nearest = loot; }
+      }
+      if (nearest && nearestD <= 12.0) {
+        this.claimEpicChest(player, nearest);
+      } else {
+        this.broadcast({
+          type: 'floating_text',
+          text: nearest ? `❌ TOO FAR — MOVE CLOSER TO THE RELIC!` : `❌ NO RELIC CHEST NEARBY`,
+          x: player.x,
+          z: player.z,
+          style: 'crit'
+        });
+      }
     } else if (cmd === 'heal') {
       if ((player.cooldowns.tacticalHeal || 0) > 0) {
         this.broadcast({
@@ -2335,14 +2357,66 @@ class Room {
     return Gear.unequip(this, playerId, slot);
   }
 
+  // Boss reward: Malakor's Molten Relic epic chest, spawned by
+  // triggerBossDefeated(). Claiming is deliberately intentional — it is
+  // excluded from the loot vacuum & jump-magnet (see executeTacticalCommand
+  // and handlePlayerAction) so the player taps TAP TO CLAIM or walks over it.
+  // Reward mirrors the treasure_chest pattern: the chest's recorded gold
+  // value plus one generated item (boss-tier, matching the boss's showered
+  // drops) and a 35% max-HP heal. Humans only (bots can't trigger chests).
+  claimEpicChest(player, loot) {
+    if (!loot || loot.pickedUp || loot.type !== 'epic_chest') return false;
+    if (!player || player.isDead || player.isDowned || player.isBot) return false;
+
+    // Gold: the chest's recorded value, oath-modified like other gold pickups.
+    const goldAmt = this.systems?.oaths?.modifyGoldPickup(player, loot.value) ?? loot.value;
+    player.stats.goldCollected = (player.stats.goldCollected || 0) + goldAmt;
+    this.totalGoldDropped = (this.totalGoldDropped || 0) + goldAmt;
+
+    // Relic gear: boss-tier roll, matching the boss's showered drops.
+    const chestBiome = (this.proceduralConfig && this.proceduralConfig.biome && this.proceduralConfig.biome.id) || 'ossuary_crypt';
+    const relicItem = LootGenerator.generateItem(this.floor, 'boss', chestBiome);
+    const pickup = Gear.addToInventory(this, player, relicItem, 'chest');
+    if (!pickup.ok) {
+      // Inventory full: drop the relic on the ground instead of losing it.
+      this.spawnFloorLoot('gear_drop', loot.x, loot.z, relicItem.gearScore, relicItem.name, false, relicItem);
+    }
+    Health.healPlayer(this, player.id, Math.round(player.maxHp * 0.35), 'Molten Relic');
+
+    loot.pickedUp = true;
+    this.broadcast({
+      type: 'loot_collected',
+      playerId: player.id,
+      playerName: player.name,
+      lootType: 'epic_chest',
+      lootName: loot.name,
+      value: goldAmt,
+      itemName: relicItem.name,
+      lootId: loot.id
+    });
+    this.broadcast({
+      type: 'floating_text',
+      text: `🏆 MALAKOR'S MOLTEN RELIC CLAIMED! +${goldAmt} GOLD & ${relicItem.rarityName.toUpperCase()} GEAR!`,
+      x: loot.x,
+      z: loot.z,
+      style: 'combo'
+    });
+    this.broadcast({
+      type: 'narrator_announcement',
+      text: `${player.name} claimed ${loot.name} (+${goldAmt} Gold & ${relicItem.name})!`,
+      tone: 'loot'
+    });
+    return true;
+  }
+
   updateFloorLoot() {
     for (const loot of this.floorLoot) {
-      if (loot.pickedUp || loot.type === 'epic_chest') continue;
+      if (loot.pickedUp) continue;
 
       for (const p of Object.values(this.players)) {
         if (p.isDowned || p.isDead) continue;
         // Only human players trigger shrines, chests, gear drops & relics so the user activates them intentionally
-        if (p.isBot && (loot.type === 'shrine_blood' || loot.type === 'shrine_arcane' || loot.type === 'treasure_chest' || loot.type === 'relic_weapon' || loot.type === 'relic_talisman' || loot.type === 'gear_drop')) {
+        if (p.isBot && (loot.type === 'shrine_blood' || loot.type === 'shrine_arcane' || loot.type === 'treasure_chest' || loot.type === 'epic_chest' || loot.type === 'relic_weapon' || loot.type === 'relic_talisman' || loot.type === 'gear_drop')) {
           continue;
         }
 
@@ -2433,6 +2507,10 @@ class Room {
               text: `${p.name} unlocked the ${loot.name} (+${loot.value} Gold & ${chestItem.name})!`,
               tone: 'loot'
             });
+          } else if (loot.type === 'epic_chest') {
+            // Boss reward: Malakor's Molten Relic chest. Claimable by walking
+            // over it or via the 'claim_chest' tactical command (TAP TO CLAIM).
+            consumed = this.claimEpicChest(p, loot);
           } else if (loot.type === 'relic_weapon') {
             for (const ally of Object.values(this.players)) {
               ally.damageBuff = +(ally.damageBuff + 0.35).toFixed(2);

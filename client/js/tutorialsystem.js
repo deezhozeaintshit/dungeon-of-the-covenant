@@ -6,6 +6,8 @@ export class TutorialSystem {
     this.active = false;
     this.currentStep = 0;
     this.steps = [];
+    this._lastFocused = null;    // element focused before the tooltip opened
+    this._lastKeyHandler = null; // { tooltip, onKeyDown } for cleanup
     this.listeners = {
       onTutorialStart: [],
       onTutorialStep: [],
@@ -53,31 +55,60 @@ export class TutorialSystem {
   }
 
   // Show tooltip
+  // Track 3 UX (WCAG 2.1 AA): the tooltip is a modal dialog — role="dialog",
+  // aria-modal, labelled/described by its content, focus moved into it on
+  // show, Tab trapped between the buttons, Esc skips, and focus is restored
+  // to the previously focused element on close.
   showTooltip(step) {
     // Remove existing tooltip
     const existing = document.querySelector('.tutorial-tooltip');
     if (existing) existing.remove();
 
+    // Remember where focus was so we can put it back on close.
+    if (!this._lastFocused) {
+      this._lastFocused = document.activeElement instanceof HTMLElement
+        ? document.activeElement : null;
+    }
+
+    const stepNo = this.currentStep + 1;
+    const stepTotal = this.steps.length;
+    const isLast = this.currentStep >= stepTotal - 1;
+
     const tooltip = document.createElement('div');
     tooltip.className = 'tutorial-tooltip';
+    tooltip.setAttribute('role', 'dialog');
+    tooltip.setAttribute('aria-modal', 'true');
+    tooltip.setAttribute('aria-labelledby', 'tutorial-tip-title');
+    tooltip.setAttribute('aria-describedby', 'tutorial-tip-text tutorial-tip-step');
     tooltip.innerHTML = `
       <div class="tooltip-content">
-        <span class="tooltip-title">${step.title || ''}</span>
-        <p class="tooltip-text">${step.text || ''}</p>
+        <span class="tooltip-title" id="tutorial-tip-title">${step.title || ''}</span>
+        <p class="tooltip-text" id="tutorial-tip-text">${step.text || ''}</p>
+        <span class="tooltip-step" id="tutorial-tip-step">STEP ${stepNo} OF ${stepTotal}</span>
         <div class="tooltip-actions">
-          <button class="btn-tutorial-next">${step.nextText || 'Next'}</button>
-          <button class="btn-tutorial-skip">Skip</button>
+          <button class="btn-tutorial-next" type="button">${isLast ? 'FINISH' : (step.nextText || 'NEXT')}</button>
+          <button class="btn-tutorial-skip" type="button">SKIP TUTORIAL</button>
         </div>
       </div>
     `;
 
-    // Position tooltip
-    if (step.highlightElement) {
-      const rect = step.highlightElement.getBoundingClientRect();
-      tooltip.style.position = 'fixed';
-      tooltip.style.left = `${rect.right + 10}px`;
-      tooltip.style.top = `${rect.top}px`;
-    } else {
+    // Position tooltip — highlight elements hidden on this device (e.g. the
+    // touch joystick on desktop) fall back to bottom-center.
+    const hl = step.highlightElement;
+    let anchored = false;
+    if (hl) {
+      try {
+        const rect = hl.getBoundingClientRect();
+        const cs = window.getComputedStyle(hl);
+        if (rect.width > 0 && rect.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden') {
+          tooltip.style.position = 'fixed';
+          tooltip.style.left = `${Math.min(rect.right + 10, window.innerWidth - 360)}px`;
+          tooltip.style.top = `${Math.max(8, rect.top)}px`;
+          anchored = true;
+        }
+      } catch (e) { /* fall through to default position */ }
+    }
+    if (!anchored) {
       tooltip.style.position = 'fixed';
       tooltip.style.bottom = '20px';
       tooltip.style.left = '50%';
@@ -87,8 +118,36 @@ export class TutorialSystem {
     document.body.appendChild(tooltip);
 
     // Bind buttons
-    tooltip.querySelector('.btn-tutorial-next').addEventListener('click', () => this.next());
-    tooltip.querySelector('.btn-tutorial-skip').addEventListener('click', () => this.skip());
+    const nextBtn = tooltip.querySelector('.btn-tutorial-next');
+    const skipBtn = tooltip.querySelector('.btn-tutorial-skip');
+    nextBtn.addEventListener('click', () => this.next());
+    skipBtn.addEventListener('click', () => this.skip());
+
+    // Esc skips; Tab cycles between the two buttons (focus trap).
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.skip();
+        return;
+      }
+      if (e.key === 'Tab') {
+        const focusables = [nextBtn, skipBtn];
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    tooltip.addEventListener('keydown', onKeyDown);
+    this._lastKeyHandler = { tooltip, onKeyDown };
+
+    // Move focus into the dialog.
+    nextBtn.focus();
   }
 
   // Go to next step
@@ -113,15 +172,23 @@ export class TutorialSystem {
   complete() {
     this.active = false;
     this.currentStep = 0;
-    
+
     // Clear all highlights
     document.querySelectorAll('.tutorial-highlight').forEach(el => {
       el.classList.remove('tutorial-highlight');
     });
 
-    // Remove tooltip
+    // Remove tooltip + its key handler, restore focus.
+    if (this._lastKeyHandler) {
+      try { this._lastKeyHandler.tooltip.removeEventListener('keydown', this._lastKeyHandler.onKeyDown); } catch (e) { /* noop */ }
+      this._lastKeyHandler = null;
+    }
     const tooltip = document.querySelector('.tutorial-tooltip');
     if (tooltip) tooltip.remove();
+    if (this._lastFocused && typeof this._lastFocused.focus === 'function') {
+      try { this._lastFocused.focus(); } catch (e) { /* noop */ }
+    }
+    this._lastFocused = null;
 
     this.notifyListeners('onTutorialComplete');
   }

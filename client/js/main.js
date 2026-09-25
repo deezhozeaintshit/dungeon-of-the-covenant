@@ -7,6 +7,7 @@ import { CombatVisuals } from './combat.js?v=9.0';
 import { GameControls } from './controls.js?v=9.0';
 // [Phase4-WS5] Touch controls manager: auto-detect + Auto/On/Off preference + optimistic cooldown sweeps.
 import { TouchControlsManager } from './ui/touchControls.js?v=9.0';
+import { initHudDrawer } from './ui/hudDrawer.js?v=9.0';
 import { NarratorSystem } from './narrator.js?v=9.0';
 import { LootSystem } from './loot.js?v=9.0';
 import { NetworkClient } from './network.js?v=9.0';
@@ -25,6 +26,9 @@ import { initCharacterSelect } from './ui/characterSelect.js?v=5.0';
 import { initHUD } from './ui/hud.js?v=5.0';
 import { initScreens } from './ui/screens.js?v=5.0';
 import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
+// Track 3 UX: first-run tutorial overlay + boss-relic claim affordance.
+import { maybeShowFirstRunTutorial } from './ui/firstRunTutorial.mjs?v=5.1';
+import { initRelicClaim } from './ui/relicClaim.js?v=5.1';
 // Phase 2: enemy visuals (telegraphs / spawn / boss phases), game-wide
 // animation (Mixamo clips + procedural fallback), progression UI
 // (level-up choices, skill tree, death-respawn), and oath shrines.
@@ -191,6 +195,16 @@ class GameApp {
     this.touchControls = new TouchControlsManager();
     this.touchControls.init();
 
+    // [Track2] Touch-only consolidated HUD drawer: collapses the secondary
+    // HUD buttons into one menu icon on touch devices. Gated on
+    // body.touch-active; does nothing on desktop.
+    try {
+      this.hudDrawer = initHudDrawer();
+    } catch (err) {
+      console.warn('[HUD] drawer init failed:', err);
+      this.hudDrawer = null;
+    }
+
     this.controls = new GameControls({
       onInput: (vec, rot) => {
         if (this.gameState === 'dungeon' && this.network) {
@@ -245,6 +259,13 @@ class GameApp {
       onQuitToLobby: () => window.location.reload(),
     });
     this.ui.damageNumbers = initDamageNumbers();
+    // Track 3 UX: boss-relic TAP TO CLAIM affordance (contextual DOM button).
+    try {
+      this.ui.relicClaim = initRelicClaim({ game: this, network: this.network });
+    } catch (err) {
+      console.warn('[Track3] relicClaim init failed:', err);
+      this.ui.relicClaim = null;
+    }
     this.ui.damageNumbers.setProjector((w) => {
       if (!this.renderer || !this.renderer.camera) return null;
       _projV.set(w.x, w.y !== undefined ? w.y : 1.5, w.z !== undefined ? w.z : 0);
@@ -1303,6 +1324,17 @@ class GameApp {
       narrator_announcement: (msg) => {
         this.narrator.say(msg.text, msg.tone);
       },
+      // Track 3 UX: toast naming exactly what the boss relic chest granted.
+      // (Gold/potion pickups stay quiet — only the epic claim gets a toast.)
+      loot_collected: (msg) => {
+        if (msg && msg.lootType === 'epic_chest' && this.ui && this.ui.hud && typeof this.ui.hud.toast === 'function') {
+          const name = msg.lootName || "Malakor's Molten Relic";
+          const gold = (msg.value != null) ? msg.value : 0;
+          const item = msg.itemName ? ` & ${msg.itemName}` : '';
+          this.ui.hud.toast(`🏆 CLAIMED: ${name} (+${gold} Gold${item})`, 'gold');
+          if (this.audio) this.audio.playSFX('chest');
+        }
+      },
       party_ping: (msg) => {
         this.combat.spawnPartyPing(msg.pingType, msg.x, msg.z, msg.playerName);
         this.narrator.say(`${msg.playerName}: ${msg.pingType.toUpperCase()}!`, 'info');
@@ -1651,6 +1683,8 @@ class GameApp {
     document.getElementById('game-hud').classList.remove('hidden');
     this.controls.setSkillInfo(CLASSES[this.selectedClass].abilities);
     this.audio.playSFX('powerup');
+    // Track 3 UX: first-run tutorial overlay (once ever, skippable).
+    try { maybeShowFirstRunTutorial(this); } catch (e) { /* best effort */ }
     // Phase 4 (workstream 3): start the rolling 30s clip buffer now that
     // real gameplay footage is rendering. start() is a safe no-op when the
     // recorder is already buffering or unsupported in this browser.
@@ -1704,6 +1738,9 @@ class GameApp {
     // 5. Sync Floor Loot
     this.loot.syncFloorLoot(snap.floorLoot);
 
+    // Track 3 UX: boss-relic TAP TO CLAIM contextual button visibility.
+    try { this.ui?.relicClaim?.update(snap); } catch (e) { /* best effort */ }
+
     // 6. Update Party HUD & Quest Banner
     this.updatePartyHUD(snap.players);
 
@@ -1738,8 +1775,15 @@ class GameApp {
     if (questTextEl) {
       const seals = snap.sanctumSealsRemaining ?? 2;
       const broken = 2 - seals;
+      // Track 3 UX: the persistent objective line prefers the REAL objective
+      // state (server objectives_update via the objective tracker) over the
+      // legacy quest-flow text. Boss-dead stays top priority.
+      let objectiveLine = null;
+      try { objectiveLine = this.ui?.objectives?.getCurrentLine?.() || null; } catch (e) { /* best effort */ }
       if (snap.boss && snap.boss.isDead) {
         questTextEl.innerText = '🏆 VICTORY! Claim Malakor\'s Molten Great-Relic Chest!';
+      } else if (objectiveLine) {
+        questTextEl.innerText = objectiveLine;
       } else if (seals > 0) {
         questTextEl.innerText = `QUEST: Shatter Wing Soul-Seals (${broken}/2) • Malakor Ward: ${seals * 25}% DMG Reduction`;
       } else {

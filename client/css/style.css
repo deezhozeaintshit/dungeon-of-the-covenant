@@ -331,6 +331,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-x: clip; /* safety net only: chips wrap inside the bar (see above) */
 }
 .game-header { text-align: center; }
 .cover-frame {
@@ -453,6 +454,10 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
   color: var(--gold-soft);
   display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px;
 }
+/* Account-bar chips (rank/seals, season pass) — must wrap gracefully INSIDE the
+   bar instead of overflowing the menu boundary on narrow phones. */
+.account-bar-summary > span { min-width: 0; }
+.account-bar-summary .account-chip { white-space: normal; max-width: 100%; overflow-wrap: anywhere; }
 
 /* class grid */
 .class-grid {
@@ -1492,7 +1497,10 @@ body.touch-active {
 .tooltip-text { font-size: 0.84rem; color: var(--parchment); line-height: 1.55; }
 .tooltip-content { display: flex; flex-direction: column; gap: 8px; }
 .tooltip-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 6px; }
-.btn-tutorial-next, .btn-tutorial-skip { min-height: 40px; padding: 8px 16px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; }
+/* Track 3 UX: step progress indicator + WCAG 2.1 AA touch targets/focus */
+.tooltip-step { font-size: 0.68rem; letter-spacing: 2px; color: var(--gold-soft); font-weight: 700; }
+.btn-tutorial-next, .btn-tutorial-skip { min-height: 44px; padding: 8px 16px; border-radius: 8px; font-weight: 800; font-size: 0.8rem; cursor: pointer; }
+.btn-tutorial-next:focus-visible, .btn-tutorial-skip:focus-visible { outline: 3px solid #ffffff; outline-offset: 2px; }
 .btn-tutorial-next { background: var(--gold); color: #1a0f2e; border: none; }
 .btn-tutorial-skip { background: transparent; color: var(--parchment-dim); border: 1px solid #6b568a; }
 .tutorial-highlight { outline: 2px solid var(--gold-hi) !important; outline-offset: 3px; border-radius: 8px; }
@@ -1672,3 +1680,189 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .cosmetic-use-btn { border-color: #66e0ff; color: #a8ecff; }
 /* Legacy pay-to-win IAP cards removed with the old armory section. */
 .iap-grid, .iap-card { display: none; }
+
+/* ==========================================================================
+   [Track2] TOUCH-ONLY CONSOLIDATED HUD MENU DRAWER
+   ==========================================================================
+   DESKTOP IS UNAFFECTED BY DESIGN: every rule in this section is either
+   `display:none` by default, or scoped under `body.touch-active` (the class
+   the touch manager sets only on touch devices / touch preference "On").
+   On non-touch bodies the menu FAB, scrim and drawer never render, and
+   hudDrawer.js performs zero DOM moves. No desktop markup, classes, or
+   handlers change.
+   On touch, hudDrawer.js moves the secondary HUD buttons (war horn, party,
+   UI, shop, forge, secret, audio, pause menu, clip, exit, the two map
+   buttons, invite chip) into #hud-drawer-list. Buttons keep their own ids
+   and handlers — only their container changes. */
+
+/* ---- inert by default (desktop + pre-build) ---- */
+#btn-hud-menu,
+#hud-drawer,
+#hud-drawer-scrim {
+  display: none;
+}
+
+/* ---- the single menu icon (top bar, touch only) ---- */
+body.touch-active #btn-hud-menu {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 48px;  /* [Track2] 44px+ touch target */
+  min-height: 48px; /* [Track2] 44px+ touch target */
+  padding: 8px 12px;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--gold-hi);
+  background: var(--panel-soft);
+  border: 1.5px solid var(--panel-line);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+body.touch-active #btn-hud-menu:active { transform: scale(0.94); }
+body.touch-active #btn-hud-menu[aria-expanded="true"] {
+  border-color: var(--gold-hi);
+  background: rgba(48, 34, 12, 0.95);
+}
+
+/* ---- tap-outside scrim (transparent so the game stays visible) ---- */
+body.touch-active #hud-drawer-scrim.open {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 118;
+  background: transparent;
+  touch-action: manipulation;
+}
+
+/* ---- the drawer panel (right side, below the top bar) ---- */
+body.touch-active #hud-drawer {
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: calc(70px + var(--safe-t));
+  right: calc(8px + var(--safe-r));
+  bottom: calc(12px + var(--safe-b));
+  width: min(248px, 74vw);
+  max-height: calc(100dvh - 90px);
+  z-index: 120;
+  background: rgba(12, 9, 22, 0.97);
+  border: 1.5px solid var(--panel-line);
+  border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.65);
+  overflow: hidden;
+  visibility: hidden;
+  transform: translateX(112%);
+  transition: transform 0.22s ease-out, visibility 0.22s;
+  touch-action: manipulation;
+}
+body.touch-active #hud-drawer.open {
+  visibility: visible;
+  transform: translateX(0);
+}
+
+body.touch-active .hud-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--panel-line);
+  flex: 0 0 auto;
+}
+body.touch-active .hud-drawer-title {
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  color: var(--gold-hi);
+}
+body.touch-active .hud-drawer-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;  /* [Track2] 44px+ touch target */
+  min-height: 44px; /* [Track2] 44px+ touch target */
+  color: var(--parchment);
+  background: #231b33;
+  border: 1px solid #6b568a;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+body.touch-active #hud-drawer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Moved buttons become full-width drawer rows. Their original classes stay
+   (handlers and icon markup untouched); layout is overridden to a row. */
+body.touch-active #hud-drawer-list > button {
+  width: 100%;
+  min-height: 48px; /* [Track2] 44px+ touch target */
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--parchment); /* parchment on dark panel: high contrast */
+  background: var(--panel-soft);
+  border: 1.5px solid var(--panel-line);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+body.touch-active #hud-drawer-list > button:active { transform: scale(0.97); }
+body.touch-active #hud-drawer-list .secret-icon,
+body.touch-active #hud-drawer-list .horn-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+body.touch-active #hud-drawer-list .secret-label,
+body.touch-active #hud-drawer-list .horn-label {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: var(--gold-soft); /* gold-soft on dark panel: AA-safe */
+}
+/* Buttons without icon/label spans (party toggle, map toggles, invite chip)
+   still read as rows; keep their inline content legible. */
+body.touch-active #hud-drawer-list > #btn-min-party,
+body.touch-active #hud-drawer-list > #btn-minimap-toggle,
+body.touch-active #hud-drawer-list > #btn-min-right-stack,
+body.touch-active #hud-drawer-list > #hud-room-code-chip {
+  font-size: 0.78rem;
+  color: var(--gold-hi);
+}
+/* The invite chip hides itself via .hidden when there is no room code. */
+body.touch-active #hud-drawer-list > #hud-room-code-chip.hidden { display: none; }
+
+/* Drawer keyboard focus: reuse the global focus-visible gold outline, with
+   extra offset so it reads on the dark panel. */
+body.touch-active #btn-hud-menu:focus-visible,
+body.touch-active #hud-drawer button:focus-visible {
+  outline: 3px solid var(--gold-hi);
+  outline-offset: 2px;
+}
+
+/* Small phones: drawer clears the top bar and the minimap stack. */
+@media (max-width: 480px) {
+  body.touch-active #hud-drawer {
+    top: calc(64px + var(--safe-t));
+    width: min(232px, 70vw);
+  }
+}

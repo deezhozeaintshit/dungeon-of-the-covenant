@@ -251,6 +251,11 @@
           <span id="hud-hero-shards" class="shard-text">💎 300</span>
         </div>
 
+        <!-- Track 2: touch-only consolidated menu. display:none by default;
+             CSS shows it only on body.touch-active. Desktop is unaffected. -->
+        <button id="btn-hud-menu" class="hud-menu-fab" title="Open game menu"
+                aria-label="Open game menu" aria-expanded="false" aria-controls="hud-drawer">☰</button>
+
         <button id="btn-clean-hud" class="secret-tab-btn" title="Minimize / Restore All HUD Panels (Shortcut: H)">
           <span class="secret-icon">👁️</span>
           <span class="secret-label">UI [H]</span>
@@ -468,6 +473,19 @@
         <div class="attack-icon">⚔️</div>
         <div class="skill-cooldown-overlay" id="attack-cd"></div>
       </button>
+    </div>
+
+    <!-- Track 2: touch-only consolidated menu drawer. display:none by default;
+         CSS shows it only on body.touch-active, and hudDrawer.js moves the
+         secondary HUD buttons into #hud-drawer-list on touch devices only.
+         Desktop is completely unaffected. -->
+    <div id="hud-drawer-scrim" class="hud-drawer-scrim" aria-hidden="true"></div>
+    <div id="hud-drawer" class="hud-drawer" role="dialog" aria-label="Game menu">
+      <div class="hud-drawer-head">
+        <span class="hud-drawer-title">⚙️ MENU</span>
+        <button id="btn-hud-drawer-close" class="hud-drawer-close" aria-label="Close game menu">✖</button>
+      </div>
+      <div id="hud-drawer-list" class="hud-drawer-list"></div>
     </div>
   </div>
 

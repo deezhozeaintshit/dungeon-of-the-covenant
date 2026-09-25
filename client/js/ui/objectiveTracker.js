@@ -4,6 +4,7 @@
 // styling consistent with ui/theme.js (Cinzel gold on obsidian).
 
 import { COVENANT_THEME } from './theme.js?v=5.0';
+import { objectiveLineFor } from './objectiveLine.mjs?v=5.1';
 
 const T = COVENANT_THEME;
 
@@ -306,7 +307,12 @@ export function initObjectiveTracker({ game, network } = {}) {
       render();
     },
     clear: () => { state.objectives = []; state.floor = null; render(); },
-    render
+    render,
+    // Track 3 UX: one-line "what to do right now" for the persistent top
+    // objective line (#hud-quest-text). Driven by the real objective state;
+    // returns null when there is nothing to summarize so callers fall back
+    // to the legacy quest-flow text.
+    getCurrentLine: () => objectiveLineFor(state.objectives)
   };
 }
 

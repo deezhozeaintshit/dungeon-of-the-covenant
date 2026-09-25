@@ -11,6 +11,16 @@ export class LootSystem {
     this.lootMeshes = new Map();
     // Phase 3 game feel: fired once per newly-appeared floor drop (drop event).
     this.onLootAdded = null;
+    // Track 3 UX: cache prefers-reduced-motion so the claim-label pulse loop
+    // doesn't re-query matchMedia every frame.
+    this._reducedMotion = false;
+    try {
+      const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      this._reducedMotion = !!mq.matches;
+      if (typeof mq.addEventListener === 'function') {
+        mq.addEventListener('change', (e) => { this._reducedMotion = !!e.matches; });
+      }
+    } catch (e) { /* non-browser / headless: leave false */ }
   }
 
   // Sync 3D Floor Loot, Shrines & Chests
@@ -240,6 +250,16 @@ export class LootSystem {
       group.add(beam);
 
       this.addBillboardLabel(group, '🏆 MALAKOR\'S MOLTEN RELIC', '#ffd700', 2.4);
+
+      // Track 3 UX: unmissable claim affordance. A pulsing billboard above the
+      // chest tells the player exactly what to do (tap the claim button or
+      // walk over the chest). Pulsing is driven in update() and disabled for
+      // prefers-reduced-motion.
+      const claimLabel = this.addBillboardLabel(group, '👆 TAP TO CLAIM', '#fff2b0', 3.6);
+      if (claimLabel) {
+        claimLabel.material.transparent = true;
+        group.userData.claimLabel = claimLabel;
+      }
     }
 
     return group;
@@ -267,6 +287,7 @@ export class LootSystem {
     sprite.scale.set(3.8, 0.68, 1);
     sprite.position.y = yOffset;
     parent.add(sprite);
+    return sprite;
   }
 
   update(dt) {
@@ -280,6 +301,14 @@ export class LootSystem {
         } else {
           mesh.position.y = 0.25 + Math.sin(time * 3) * 0.08;
         }
+      }
+      // Track 3 UX: pulse the epic chest's TAP TO CLAIM label so the reward
+      // affordance is unmissable. Static full opacity for reduced-motion.
+      const claimLabel = mesh.userData.claimLabel;
+      if (claimLabel && claimLabel.material) {
+        claimLabel.material.opacity = this._reducedMotion
+          ? 1.0
+          : 0.62 + 0.38 * Math.abs(Math.sin(time * 2.4));
       }
     }
   }

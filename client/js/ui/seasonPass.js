@@ -263,8 +263,9 @@ export function initSeasonPass({
     if (!bar) return;
     let chip = document.getElementById('season-chip');
     if (!chip) {
-      chip = mk('span', '', { whiteSpace: 'nowrap' });
+      chip = mk('span');
       chip.id = 'season-chip';
+      chip.className = 'account-chip'; // wraps inside the bar; see .account-bar-summary .account-chip
       bar.appendChild(chip);
       const passBtn = mk('button', '🎟️ SEASON PASS');
       passBtn.id = 'btn-season-pass';
