@@ -435,7 +435,9 @@ class EnemyBrain {
       for (const p of this._alivePlayers(ctx)) {
         const d = Math.hypot(p.x - cx, p.z - cz);
         if (d <= w.radius + 0.4) {
-          ctx.damagePlayer(p, dmg, mob.damageType, mob.name);
+          // Phase 2: pass mob as 5th arg so Room.damagePlayer can apply
+          // oath thorns reflect + nemesis grudge modifiers.
+          ctx.damagePlayer(p, dmg, mob.damageType, mob.name, mob);
           if (w.crit) {
             ctx.broadcast({ type: 'floating_text', text: `CRIT -${dmg}`, x: p.x, z: p.z, style: 'crit' });
           }

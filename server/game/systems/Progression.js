@@ -128,7 +128,9 @@ function grantPartyXP(room, amount, reason = 'kill') {
   const results = [];
   for (const player of Object.values(room.players)) {
     if (player.isDead) continue;
-    results.push({ playerId: player.id, ...grantXP(room, player.id, amount, reason) });
+    // Phase 2: Silent Coin oath doubles XP per-player.
+    const amt = room.systems?.oaths?.modifyXpGain(player, amount) ?? amount;
+    results.push({ playerId: player.id, ...grantXP(room, player.id, amt, reason) });
   }
   return results;
 }

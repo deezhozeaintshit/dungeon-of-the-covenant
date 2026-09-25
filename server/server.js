@@ -5,6 +5,9 @@ const os = require('os');
 const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 const Room = require('./game/Room');
+// Phase 2: progression + health systems for the new ws message handlers.
+const Abilities = require('./game/systems/Abilities');
+const Health = require('./game/systems/Health');
 const stripeService = require('./stripeService');
 const authService = require('./authService');
 
@@ -429,6 +432,47 @@ function handleClientMessage(ws, socketId, data) {
           x: p.x,
           z: p.z
         });
+      }
+      break;
+    }
+
+    // Phase 2: progression / oath message handlers.
+    case 'ability_pick': {
+      const meta = socketMeta.get(ws);
+      if (!meta) return;
+      const room = rooms.get(meta.roomCode);
+      if (room && room.state === 'dungeon' && Abilities && typeof Abilities.applyAbilityPick === 'function') {
+        Abilities.applyAbilityPick(room, meta.playerId, String(data.abilityId || ''));
+      }
+      break;
+    }
+
+    case 'skill_tree_spend': {
+      const meta = socketMeta.get(ws);
+      if (!meta) return;
+      const room = rooms.get(meta.roomCode);
+      if (room && room.state === 'dungeon' && Abilities && typeof Abilities.spendAbilityPoint === 'function') {
+        Abilities.spendAbilityPoint(room, meta.playerId, String(data.abilityId || ''));
+      }
+      break;
+    }
+
+    case 'respawn_request': {
+      const meta = socketMeta.get(ws);
+      if (!meta) return;
+      const room = rooms.get(meta.roomCode);
+      if (room && room.state === 'dungeon' && Health && typeof Health.requestRespawn === 'function') {
+        Health.requestRespawn(room, meta.playerId);
+      }
+      break;
+    }
+
+    case 'swear_oath': {
+      const meta = socketMeta.get(ws);
+      if (!meta) return;
+      const room = rooms.get(meta.roomCode);
+      if (room && room.state === 'dungeon') {
+        room.systems?.oaths?.handleSwear(room, meta.playerId, data.shrineId, data.oathId);
       }
       break;
     }

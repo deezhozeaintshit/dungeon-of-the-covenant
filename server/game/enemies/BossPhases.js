@@ -524,6 +524,8 @@ class PhaseBoss {
       isEnraged: this.isEnraged,
       isAwake: this.isAwake,
       isDead: this.isDead,
+      // Phase 2: soul-seal ward count (legacy HUD + damage ward hook in Room).
+      sealsRemaining: this.sealsRemaining ?? 2,
       statuses: this.statuses,
       activeTelegraph: this.activeTelegraph ? {
         kind: this.activeTelegraph.kind,

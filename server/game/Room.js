@@ -5,6 +5,22 @@ const CollisionEngine = require('./Collision');
 const ProceduralLevelGenerator = require('./ProceduralLevelGenerator');
 const LootGenerator = require('./LootGenerator');
 
+// Phase 2 core systems (workstream 4)
+const Health = require('./systems/Health');
+const Progression = require('./systems/Progression');
+const Abilities = require('./systems/Abilities');
+// Phase 2 objectives (workstream 5) — exports { Objectives, ... }
+const { Objectives } = require('./systems/Objectives');
+// Phase 2 signature features (workstream 6)
+const Oaths = require('./systems/Oaths');
+const LivingDungeon = require('./systems/LivingDungeon');
+const Nemesis = require('./systems/Nemesis');
+// Phase 2 enemies + logic (workstream 1) — EnemyBrain exports { EnemyBrain, STATES }
+const Archetypes = require('./enemies/Archetypes');
+const { EnemyBrain } = require('./enemies/EnemyBrain');
+const Elites = require('./enemies/Elites');
+const BossPhases = require('./enemies/BossPhases');
+
 const SECRET_OBJECTIVES = [
   { id: 'gold_hoarder', title: 'The Covetous', desc: 'Finish the dungeon with at least 50% of all looted gold.' },
   { id: 'boss_slayer', title: 'The Executioner', desc: 'Personally deliver the killing blow to Malakor.' },
@@ -60,6 +76,21 @@ class Room {
 
     // Next entity IDs
     this.nextEntityId = 1000;
+
+    // Phase 2 systems registry (coordinator wiring; see systems/PROTOCOL.md)
+    this.systems = {
+      health: Health,
+      progression: Progression,
+      abilities: Abilities,
+      objectives: null, // set per floor by Objectives.createForRoom
+      oaths: Oaths,
+      livingDungeon: LivingDungeon,
+      nemesis: Nemesis
+    };
+    this.systems.livingDungeon.init(this);
+    this.systems.nemesis.init(this);
+    this.oathShrines = [];
+    this.shrines = this.shrines || [];
   }
 
   addPlayer(socketId, name, chosenClass = 'juggernaut', isBot = false, profile = null) {
@@ -154,10 +185,17 @@ class Room {
       this.equipProceduralItem(player, profile.equippedItem);
     }
 
+    // Phase 2 core systems: authoritative HP/XP/abilities init
+    Health.initPlayer(player);
+    Progression.initPlayer(player);
+    Abilities.initPlayer(player);
+
     return player;
   }
 
   removePlayer(socketId) {
+    Abilities.dropPlayer(socketId);
+    this.systems?.objectives?.onPlayerLeft(this, socketId);
     delete this.players[socketId];
   }
 
@@ -206,6 +244,12 @@ class Room {
       text: `PROCEDURAL FLOOR ${this.floor} [${this.proceduralConfig.biome.name}] — Anomaly: ${this.proceduralConfig.hexAnomaly.name}! Boss: ${this.proceduralConfig.bossVariant.name}!`,
       tone: 'intro'
     });
+
+    // Phase 2 floor systems: objectives + oath shrines + living dungeon + nemesis
+    Objectives.createForRoom(this);
+    this.systems?.oaths?.onFloorStart(this);
+    this.systems?.livingDungeon?.onFloorStart(this);
+    this.systems?.nemesis?.onFloorStart(this);
   }
 
   generateProceduralDungeonFloor(nextFloor = null, customSeed = null) {
@@ -241,6 +285,12 @@ class Room {
       text: `FLOOR ${this.floor} GENERATED [Seed #${this.proceduralConfig.seed}]: ${this.proceduralConfig.biome.name} — Hex Anomaly: ${this.proceduralConfig.anomaly.name}!`,
       tone: 'hype'
     });
+
+    // Phase 2 floor systems: objectives + oath shrines + living dungeon + nemesis
+    Objectives.createForRoom(this);
+    this.systems?.oaths?.onFloorStart(this);
+    this.systems?.livingDungeon?.onFloorStart(this);
+    this.systems?.nemesis?.onFloorStart(this);
   }
 
   initDungeonLayout() {
@@ -258,8 +308,7 @@ class Room {
         if (cfg.hexAnomaly.playerCritBonus) p.critChance = +((p.critChance || 0.18) + cfg.hexAnomaly.playerCritBonus).toFixed(2);
         if (cfg.hexAnomaly.playerHpBonus) {
           const addHp = Math.round(p.maxHp * cfg.hexAnomaly.playerHpBonus);
-          p.maxHp += addHp;
-          p.hp += addHp;
+          Health.setMaxHp(this, p.id, p.maxHp + addHp);
         }
       }
     }
@@ -270,17 +319,34 @@ class Room {
     }
 
     // Zone 7: The Soul-Forge Boss Sanctum
+    // Phase 2 (workstream 1): biome-tied multi-phase PhaseBoss replaces the
+    // legacy MalakorBoss (MalakorBoss class kept untouched as fallback).
     this.sanctumSealsRemaining = 2;
-    this.boss = new MalakorBoss(0, -75);
-    if (cfg.bossVariant) {
-      this.boss.name = cfg.bossVariant.name;
-      this.boss.element = cfg.bossVariant.element || 'infernal';
-      this.boss.tint = cfg.bossVariant.tint || 0xff4400;
-      this.boss.maxHp = Math.round(this.boss.maxHp * (cfg.floorScale || 1.0));
-      this.boss.hp = this.boss.maxHp;
-    }
+    const bossBiomeId = (cfg.biome && cfg.biome.id) ? cfg.biome.id : 'ossuary_crypt';
+    this.boss = BossPhases.createBoss(bossBiomeId, 0, -75, Object.keys(this.players).length);
+    // Preserve the legacy floor-scale difficulty bump.
+    this.boss.maxHp = Math.round(this.boss.maxHp * (cfg.floorScale || 1.0));
+    this.boss.hp = this.boss.maxHp;
+    // handleEntityDeath boss detection + soul-seal ward hook.
+    this.boss.isBoss = true;
     this.boss.sealsRemaining = this.sanctumSealsRemaining;
-    this.boss.scaleForParty(Object.keys(this.players).length);
+    this.broadcast({
+      type: 'boss_spawn',
+      boss: {
+        id: this.boss.id,
+        name: this.boss.name,
+        title: this.boss.title,
+        biomeId: this.boss.biomeId,
+        model: this.boss.model,
+        reskinTint: this.boss.reskinTint,
+        x: this.boss.x,
+        z: this.boss.z,
+        hp: this.boss.hp,
+        maxHp: this.boss.maxHp,
+        phase: this.boss.phase,
+        phaseName: this.boss.phaseName
+      }
+    });
 
     // Timed Environmental Dungeon Hazards
     this.hazards = cfg.hazards;
@@ -320,88 +386,153 @@ class Room {
     this.spawnFloorLoot('potion_health', 11, -49, 1, 'East Restoration Elixir', false);
   }
 
+  // Phase 2 (workstream 1): archetype-driven mob factory. Legacy type names are
+  // resolved via Archetypes.LEGACY_TYPE_MAP; stats come from
+  // Archetypes.buildMobStats(type, biomeId, floor) (biome reskin + floor
+  // scaling). The mob keeps the legacy fields rendering/clients rely on
+  // (hp/maxHp/speed/damage/statuses/attackTimer) plus the new role/model/
+  // biomeTint fields, a W1 EnemyBrain, and elite affixes where applicable.
   spawnMob(type, x, z) {
+    const self = this;
     const id = `mob_${this.nextEntityId++}`;
-    const scale = (this.proceduralConfig && this.proceduralConfig.floorScale) ? this.proceduralConfig.floorScale : 1.0;
-    let hp = Math.round(180 * scale);
-    let maxHp = hp;
-    let speed = 3.2;
-    let damage = Math.round(22 * scale);
-    let name = 'Skeletal Vanguard';
+    const biomeId = (this.proceduralConfig && this.proceduralConfig.biome && this.proceduralConfig.biome.id)
+      ? this.proceduralConfig.biome.id
+      : 'ossuary_crypt';
 
-    if (type === 'crypt_ghoul') {
-      name = 'Crypt Ghoul';
-      hp = Math.round(220 * scale);
-      maxHp = hp;
-      speed = 4.2;
-      damage = Math.round(28 * scale);
-    } else if (type === 'bone_archer') {
-      name = 'Bone Archer';
-      hp = Math.round(140 * scale);
-      maxHp = hp;
-      speed = 2.9;
-      damage = Math.round(32 * scale);
-    } else if (type === 'cinder_thrall') {
-      name = 'Cinder Thrall';
-      hp = Math.round(125 * scale);
-      maxHp = hp;
-      speed = 4.6;
-      damage = Math.round(25 * scale);
-    } else if (type === 'void_assassin') {
-      name = 'Void Stalker Assassin';
-      hp = Math.round(195 * scale);
-      maxHp = hp;
-      speed = 5.1;
-      damage = Math.round(36 * scale);
-    } else if (type === 'blight_necrolyte') {
-      name = 'Blight Necrolyte';
-      hp = Math.round(175 * scale);
-      maxHp = hp;
-      speed = 3.1;
-      damage = Math.round(30 * scale);
-    } else if (type === 'elite_executioner') {
-      name = 'Vorgath, Bone-Executioner';
-      hp = Math.round(950 * scale);
-      maxHp = hp;
-      speed = 3.5;
-      damage = Math.round(42 * scale);
-    } else if (type === 'elite_lich') {
-      name = 'Arch-Lich Malthor';
-      hp = Math.round(850 * scale);
-      maxHp = hp;
-      speed = 3.1;
-      damage = Math.round(38 * scale);
-    }
+    const stats = Archetypes.buildMobStats(type, biomeId, this.floor);
 
     const mob = {
       id,
-      type,
-      name,
+      type: stats.type,        // canonical archetype id (legacy name resolved)
+      legacyType: type,        // originally requested type (fallback compat)
+      role: stats.role,
+      name: stats.name,
+      biome: stats.biome,
+      biomePrefix: stats.biomePrefix,
+      biomeTint: stats.biomeTint,
+      model: stats.model,
+      modelScale: stats.modelScale,
       x,
       y: 0,
       z,
-      hp,
-      maxHp,
-      speed,
-      damage,
-      attackCooldown: 1.5,
-      attackTimer: 0,
-      specialTimer: 2.0,
+      hp: stats.hp,
+      maxHp: stats.maxHp,
+      speed: stats.speed,
+      damage: stats.damage,
+      damageType: stats.damageType,
+      aggroRange: stats.aggroRange,
+      attackRange: stats.attackRange,
+      desiredRange: stats.desiredRange,
+      attackCooldown: stats.attackCooldown,
+      attackTimer: 1.5,
+      telegraphMs: stats.telegraphMs,
+      targetPolicy: stats.targetPolicy,
+      stealth: !!stats.stealth,
+      stealthed: !!stats.stealth,
+      projectile: stats.projectile,
+      volley: stats.volley,
+      slamAttack: stats.slamAttack,
+      healAmount: stats.healAmount,
+      healRange: stats.healRange,
+      healCooldown: stats.healCooldown,
+      pounce: stats.pounce,
+      canFlee: stats.canFlee,
       statuses: {},
       isDead: false,
+      // Phase 2 server-side mob damage intake: elite shield absorb, living
+      // dungeon damage-taken mult, then the legacy wrapper application.
       takeDamage: (amount, damageType = 'physical', attacker = null) => {
+        if (mob.isDead) return { damageDealt: 0, combo: null, isDead: true, killer: attacker };
+        let amt = Math.max(0, Math.round(amount));
+        amt = Elites.absorbDamage(mob, amt);
+        amt = Math.round(amt * (self.systems?.livingDungeon?.getDamageTakenMult(mob, damageType) ?? 1));
         const buffMult = (attacker && attacker.damageBuff) ? attacker.damageBuff : 1.0;
-        const scaledAmount = Math.round(amount * buffMult);
+        const scaledAmount = Math.round(amt * buffMult);
         const combo = ComboEngine.processHit(attacker, mob, damageType, scaledAmount);
         const totalDmg = scaledAmount + (combo ? combo.bonusDamage : 0);
         mob.hp = Math.max(0, mob.hp - totalDmg);
-        const isDead = mob.hp <= 0;
-        return { damageDealt: totalDmg, combo, isDead, killer: attacker };
+        // Phase 2 post-hit hooks: threat, nemesis grudge, living-dungeon
+        // memory, oath damage log.
+        if (attacker && attacker.id) {
+          if (mob._brain) mob._brain.registerThreat(attacker.id, totalDmg);
+          self.systems?.nemesis?.onMobDamaged(self, mob, attacker, totalDmg);
+          self.systems?.livingDungeon?.recordDamage(self, attacker, totalDmg, damageType);
+          self.systems?.oaths?.recordDamageDealt(self, attacker.id, totalDmg);
+        }
+        return { damageDealt: totalDmg, combo, isDead: mob.hp <= 0, killer: attacker };
       }
     };
 
+    // Wing Wardens: roll W1 elite affixes (brutal/swift/shielded/vampiric...).
+    if (mob.type === 'elite_executioner' || mob.type === 'elite_lich') {
+      mob.isElite = true;
+      Elites.applyAffixes(mob, Elites.rollAffixes(this.floor));
+    }
+
+    // Phase 2 AI brain — server-authoritative state machine (workstream 1).
+    mob._brain = new EnemyBrain(mob);
+
     this.mobs.push(mob);
+
+    // Client preload + elite aura hook (enemies/PROTOCOL.md §2 enemy_spawn).
+    this.broadcast({
+      type: 'enemy_spawn',
+      enemy: {
+        id: mob.id,
+        type: mob.type,
+        role: mob.role,
+        name: mob.name,
+        biome: mob.biome,
+        biomeTint: mob.biomeTint,
+        model: mob.model,
+        modelScale: mob.modelScale,
+        x: mob.x,
+        z: mob.z,
+        hp: mob.hp,
+        maxHp: mob.maxHp,
+        affixes: mob.affixes || [],
+        auraColor: mob.auraColor,
+        stealthed: !!mob.stealthed
+      }
+    });
+
     return mob;
+  }
+
+  // Phase 2 (workstream 1): shared context handed to EnemyBrain instances and
+  // Elites.tick each tick. All player-damage routes through this.damagePlayer
+  // so Health/oath/nemesis hooks stay coherent.
+  _mobCtx() {
+    const self = this;
+    return {
+      players: this.players,
+      mobs: this.mobs,
+      broadcast: (msg) => self.broadcast(msg),
+      damagePlayer: (p, amt, type, src, attacker = null) => self.damagePlayer(p, amt, type, src, attacker),
+      spawnProjectile: (opts) => self._pushProjectile(opts),
+      moveEntity: (mob, dirX, dirZ, speed, dt) => {
+        const np = CollisionEngine.moveAndSlide(mob.x, mob.z, dirX, dirZ, speed, dt, 0.5);
+        mob.x = np.x;
+        mob.z = np.z;
+        return np;
+      },
+      hasLineOfSight: (x1, z1, x2, z2) => CollisionEngine.hasLineOfSight(x1, z1, x2, z2),
+      nextTelegraphId: () => `etel_${this.nextEntityId++}`
+    };
+  }
+
+  // Phase 2: server-authoritative projectile push (mob/boss brains use this;
+  // id assignment lives here so brains don't need room internals).
+  _pushProjectile(opts = {}) {
+    const p = Object.assign({
+      id: `proj_${this.nextEntityId++}`,
+      life: 2.2,
+      radius: 0.4,
+      damageType: 'physical',
+      damage: 20
+    }, opts);
+    this.projectiles.push(p);
+    return p;
   }
 
   spawnFloorLoot(type, x, z, value = 10, name = 'Loot', jitter = true, itemData = null) {
@@ -517,8 +648,7 @@ class Room {
       if (bType === 'might') {
         player.damageBuff = +(player.damageBuff + 0.12).toFixed(2);
       } else if (bType === 'vitality') {
-        player.maxHp += 150;
-        player.hp = Math.min(player.maxHp, player.hp + 150);
+        Health.setMaxHp(this, player.id, player.maxHp + 150);
       } else if (bType === 'haste') {
         player.cooldownHaste = +(player.cooldownHaste + 0.10).toFixed(2);
       }
@@ -565,8 +695,7 @@ class Room {
         style: 'combo'
       });
     } else if (upgradeType === 'armor') {
-      player.maxHp += 180;
-      player.hp = Math.min(player.maxHp, player.hp + 180);
+      Health.setMaxHp(this, player.id, player.maxHp + 180);
       player.equipment.armorLevel = (player.equipment.armorLevel || 0) + 1;
       player.equipment.armor = `Soul-Tempered Plate (${player.maxHp} Max HP)`;
       this.broadcast({
@@ -580,7 +709,9 @@ class Room {
       for (const ally of Object.values(this.players)) {
         if (ally.isDead) continue;
         ally.isDowned = false;
-        ally.hp = Math.min(ally.maxHp, ally.hp + Math.round(ally.maxHp * 0.65));
+        const rawElixir = Math.round(ally.maxHp * 0.65);
+        const elixirAmt = this.systems?.oaths?.onHeal(this, player, ally, rawElixir) ?? rawElixir;
+        Health.healPlayer(this, ally.id, elixirAmt, 'Forge Elixir');
         ally.cooldowns.skill1 = 0;
         ally.cooldowns.skill2 = 0;
         ally.cooldowns.skill3 = 0;
@@ -638,7 +769,7 @@ class Room {
           p.x = player.x + Math.cos(angle) * 2.2;
           p.z = player.z + Math.sin(angle) * 2.2;
           p.isDowned = false;
-          p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.25));
+          Health.healPlayer(this, p.id, Math.round(p.maxHp * 0.25), 'Regroup');
           idx++;
         }
       }
@@ -689,9 +820,10 @@ class Room {
       for (const ally of Object.values(this.players)) {
         if (ally.isDead) continue;
         ally.isDowned = false;
-        const healAmt = Math.round(ally.maxHp * 0.45);
-        ally.hp = Math.min(ally.maxHp, ally.hp + healAmt);
-        player.stats.healingDone += healAmt;
+        const rawTactical = Math.round(ally.maxHp * 0.45);
+        const healAmt = this.systems?.oaths?.onHeal(this, player, ally, rawTactical) ?? rawTactical;
+        const healed = Health.healPlayer(this, ally.id, healAmt, 'Tactical Heal');
+        player.stats.healingDone += healed;
       }
       this.groundEffects.push({
         id: `eff_${this.nextEntityId++}`,
@@ -716,7 +848,7 @@ class Room {
       const drainTarget = this.findNearestFoe(player.x, player.z, 12.0);
       if (drainTarget) {
         this.dealDirectDamage(player, drainTarget, 85, 'dark');
-        player.hp = Math.min(player.maxHp, player.hp + 65);
+        Health.healPlayer(this, player.id, 65, 'Soul Drain');
         this.broadcast({
           type: 'beam_fx',
           beamType: 'soul_drain',
@@ -736,6 +868,12 @@ class Room {
   }
 
   handlePlayerAction(player, action, targetPos) {
+    // Phase 2: respawn requests route to Health.requestRespawn even while
+    // downed/dead (before the early-return below).
+    if (action === 'respawn') {
+      Health.requestRespawn(this, player.id);
+      return;
+    }
     if (player.isDowned || player.isDead) return;
 
     // Support tactical commands passed via action
@@ -821,6 +959,8 @@ class Room {
         endX: player.x,
         endZ: player.z
       });
+      // Phase 2: Iron Vigil breaks on retreat (dash with a foe within 6m).
+      this.systems?.oaths?.onDash(this, player);
       return;
     }
 
@@ -856,7 +996,7 @@ class Room {
         const drainFoe = this.findNearestFoe(player.x, player.z, 11.0);
         if (drainFoe) {
           this.dealDirectDamage(player, drainFoe, 55, 'dark');
-          player.hp = Math.min(player.maxHp, player.hp + 45);
+          Health.healPlayer(this, player.id, 45, 'Soul Drain');
           this.broadcast({
             type: 'beam_fx',
             beamType: 'soul_drain',
@@ -1099,9 +1239,14 @@ class Room {
           : this.findNearestFoe(player.x, player.z, 10.0);
         if (drainTarget) {
           const res = drainTarget.takeDamage(75, 'dark', player);
-          player.hp = Math.min(player.maxHp, player.hp + 60);
+          this._resolveMobLethal(drainTarget, player);
+          Health.healPlayer(this, player.id, 60, 'Soul Drain');
           for (const ally of Object.values(this.players)) {
-            if (!ally.isDowned && !ally.isDead) ally.hp = Math.min(ally.maxHp, ally.hp + 30);
+            if (!ally.isDowned && !ally.isDead) {
+              const rawShare = 30;
+              const shareAmt = this.systems?.oaths?.onHeal(this, player, ally, rawShare) ?? rawShare;
+              Health.healPlayer(this, ally.id, shareAmt, 'Soul Drain Share');
+            }
           }
           this.broadcast({
             type: 'beam_fx',
@@ -1154,6 +1299,7 @@ class Room {
         const eviscTarget = this.findNearestFoe(player.x, player.z, 3.0);
         if (eviscTarget) {
           const res = eviscTarget.takeDamage(120, 'execute', player);
+          this._resolveMobLethal(eviscTarget, player);
           if (res.combo && res.combo.comboTriggered) {
             this.combosTriggeredCount++;
             this.broadcast({
@@ -1289,6 +1435,14 @@ class Room {
     // 1. Update Players
     this.updatePlayers(simDt);
 
+    // 1b. Phase 2 system ticks (health downed timers live in Health.tick now).
+    Health.tick(this, simDt);
+    this.systems?.objectives?.onTick(this, simDt);
+    this.systems?.oaths?.onTick(this, simDt);
+    this.systems?.oaths?.checkShrineProximity(this);
+    this.systems?.livingDungeon?.onRoomTick(this);
+    this.systems?.nemesis?.onRoomTick(this);
+
     // 2. Update AI Companion Bots
     this.updateBots(simDt);
 
@@ -1298,18 +1452,22 @@ class Room {
     // 4. Update Mobs
     this.updateMobs(simDt);
 
-    // 5. Update Boss
+    // 5. Update Boss — Phase 2 PhaseBoss (workstream 1) via coordinator ctx.
+    // bossCtx: { players, broadcast, damagePlayer, spawnAdds, spawnProjectile, nextTelegraphId }.
     if (this.boss && !this.boss.isDead) {
-      this.boss.update(
-        simDt,
-        this.players,
-        (x, z, count) => {
+      this.boss.update(simDt, {
+        players: this.players,
+        broadcast: (msg) => this.broadcast(msg),
+        damagePlayer: (p, amt, type, src, attacker = null) =>
+          this.damagePlayer(p, amt, type, src, attacker || this.boss),
+        spawnAdds: (type, x, z, count) => {
           for (let i = 0; i < count; i++) {
-            this.spawnMob('cinder_thrall', x + (i - 1) * 2.5, z + 3);
+            this.spawnMob(type, x + (i - 1) * 2.5, z + 3);
           }
         },
-        (msg) => this.broadcast(msg)
-      );
+        spawnProjectile: (opts) => this._pushProjectile(opts),
+        nextTelegraphId: () => `btel_${this.nextEntityId++}`
+      });
     }
 
     // 6. Update Ground Effects & Environmental Dungeon Traps
@@ -1433,17 +1591,9 @@ class Room {
       if (p.isDead) continue;
 
       if (p.isDowned) {
+        // Phase 2: downed->dead expiry owned by Health.tick (Ashen Martyr
+        // halves the timer inside Health).
         downedCount++;
-        p.downedTimer -= dt;
-        if (p.downedTimer <= 0) {
-          p.isDowned = false;
-          p.isDead = true;
-          this.broadcast({
-            type: 'narrator_announcement',
-            text: `${p.name} has succumbed to their wounds in the dark...`,
-            tone: 'warning'
-          });
-        }
       } else {
         aliveCount++;
         soleSurvivor = p;
@@ -1480,7 +1630,9 @@ class Room {
           if (moveLen > 0) {
             const overdriveBoost = p.overdrive ? 1.22 : 1.0;
             const airBoost = isAirborne ? 1.32 : 1.0;
-            const speed = p.speed * overdriveBoost * airBoost * (ComboEngine.hasStatus(p, 'tar') && !isAirborne ? 0.4 : 1.0);
+            // Phase 2: oath speed multipliers (Ashen Martyr ally-boost / Hollow Saint penalty).
+            const oathSpeed = this.systems?.oaths?.getSpeedMult(p) ?? 1;
+            const speed = p.speed * overdriveBoost * airBoost * (ComboEngine.hasStatus(p, 'tar') && !isAirborne ? 0.4 : 1.0) * oathSpeed;
             const newPos = CollisionEngine.moveAndSlide(p.x, p.z, p.vx, p.vz, speed, dt, 0.6, isAirborne);
             p.x = newPos.x;
             p.z = newPos.z;
@@ -1660,10 +1812,12 @@ class Room {
       let hit = false;
 
       if (p.isEnemy) {
-        // Hostile projectile fired by Bone Archer or Arch-Lich Malthor
+        // Hostile projectile fired by a mob. Resolve the firing mob as the
+        // attacker so oath thorns / nemesis grudge hooks fire.
+        const mob = p.sourceId ? this.mobs.find(mm => mm.id === p.sourceId) : null;
         for (const pl of Object.values(this.players)) {
           if (!pl.isDead && !pl.isDowned && Math.hypot(pl.x - p.x, pl.z - p.z) <= (0.85 + p.radius)) {
-            this.damagePlayer(pl, p.damage, p.damageType || 'physical', p.sourceName || 'Enemy');
+            this.damagePlayer(pl, p.damage, p.damageType || 'physical', p.sourceName || 'Enemy', mob);
             hit = true;
             break;
           }
@@ -1699,13 +1853,20 @@ class Room {
 
   applyProjectileHit(attacker, target, proj) {
     if (!target) return;
+    // Phase 2: boss soul-seal ward + living dungeon resist on projectile hits.
+    let projDmg = proj.damage;
+    if (target === this.boss) {
+      const seals = this.boss.sealsRemaining ?? 2;
+      const wardMult = seals === 2 ? 0.50 : (seals === 1 ? 0.75 : 1.20);
+      projDmg = Math.round(projDmg * wardMult * (this.systems?.livingDungeon?.getDamageTakenMult(this.boss, proj.damageType) ?? 1));
+    }
     const res = typeof target.takeDamage === 'function'
-      ? target.takeDamage(proj.damage, proj.damageType, attacker)
-      : { damageDealt: proj.damage, isDead: false };
+      ? target.takeDamage(projDmg, proj.damageType, attacker)
+      : { damageDealt: projDmg, isDead: false };
     if (attacker && res.damageDealt) {
       attacker.stats.damageDealt += res.damageDealt;
-      if (attacker.lifesteal > 0 && !attacker.isDead) {
-        attacker.hp = Math.min(attacker.maxHp, attacker.hp + Math.round(res.damageDealt * attacker.lifesteal));
+      if (attacker.lifesteal > 0 && !attacker.isDead && attacker.id) {
+        Health.healPlayer(this, attacker.id, Math.round(res.damageDealt * attacker.lifesteal), 'Lifesteal');
       }
     }
 
@@ -1726,17 +1887,35 @@ class Room {
       }
     }
 
-    if (res.isDead) {
-      this.handleEntityDeath(target, attacker);
-    }
+    this._resolveMobLethal(target, attacker);
+
+    // Phase 2: objective shrines take real damage from projectile hits.
+    this.systems?.objectives?.damageShrinesAt(this, proj.x, proj.z, 1.5, proj.damage, proj.damageType);
   }
 
   updateMobs(dt) {
+    const ctx = this._mobCtx();
     for (const m of this.mobs) {
       if (m.isDead) continue;
       ComboEngine.tickStatuses(m, dt);
 
       if (ComboEngine.hasStatus(m, 'frozen')) continue;
+
+      // Phase 2: brained mobs run the EnemyBrain state machine. The legacy
+      // per-type block below is kept only for brainless mobs.
+      if (m._brain) {
+        // huntTargetId (Living Dungeon blood-hunt packs, HUNTED players) and
+        // grudgeTargetId (Nemesis returns) override brain target selection.
+        const huntId = m.huntTargetId || m.grudgeTargetId;
+        if (huntId) {
+          const hunt = this.players[huntId];
+          if (hunt && !hunt.isDead && !hunt.isDowned) {
+            m._brain.ai.targetId = huntId;
+          }
+        }
+        m._brain.update(dt, ctx);
+        continue;
+      }
 
       // Resolve active mini-boss telegraph if any
       if (m.activeTelegraph) {
@@ -1748,7 +1927,7 @@ class Room {
             if (pl.isDowned || pl.isDead) continue;
             const d = Math.hypot(pl.x - tel.x, pl.z - tel.z);
             if (d <= tel.radius) {
-              this.damagePlayer(pl, tel.damage, tel.damageType || 'physical', m.name);
+              this.damagePlayer(pl, tel.damage, tel.damageType || 'physical', m.name, m);
             }
           }
         }
@@ -1904,51 +2083,57 @@ class Room {
           } else {
             // Standard melee hit
             m.attackTimer = m.attackCooldown;
-            this.damagePlayer(target, m.damage, 'physical', m.name);
+            this.damagePlayer(target, m.damage, 'physical', m.name, m);
           }
         }
       }
     }
+    // Phase 2: elite aura/ward tick (shielded affix ward reform).
+    Elites.tick(dt, ctx);
   }
 
-  damagePlayer(player, amount, damageType, sourceName) {
-    if (player.isDowned || player.isDead) return;
+  // Phase 2: composed damage choke point — Health.damagePlayer owns armor,
+  // resists, i-frames, thorns reflection, and downed/death broadcasts.
+  // The legacy inline implementation was replaced; Health.tick (called from
+  // update()) owns the downed->dead timer now.
+  damagePlayer(player, amount, damageType, sourceName, attacker = null) {
+    if (!player || player.isDead || player.isDowned) return { dealt: 0, ignored: true };
 
-    // Invulnerability i-frames during Tactical Dash!
-    if (player.invulnerableTimer && player.invulnerableTimer > 0) {
+    // Iron Vigil: -30% damage taken (oath multiplier, rounded once).
+    amount = Math.round(amount * (this.systems?.oaths?.getDamageTakenMult(player) ?? 1));
+    // Nemesis grudge: +30% vs the nemesis's grudge target.
+    if (attacker) amount = this.systems?.nemesis?.modifyDamageToPlayer(attacker, player, amount) ?? amount;
+
+    const res = Health.damagePlayer(this, player.id, amount, {
+      type: damageType,
+      sourceName,
+      attackerId: attacker?.id || null
+    });
+
+    if (res && (res.downed || res.killed)) {
+      this.systems?.livingDungeon?.recordDeath(this, player);
+      this.systems?.oaths?.onPlayerDowned(this, player);
+    }
+
+    // Oath thorns (Iron Vigil +15) reflect flat damage onto the attacking mob.
+    // Health.damagePlayer already handles player.thorns % reflect; this is the
+    // separate oath-granted flat reflect.
+    const oathThorns = this.systems?.oaths?.getThorns(player) ?? 0;
+    if (oathThorns > 0 && attacker && attacker.hp !== undefined && res && res.dealt > 0 && !attacker.isDead) {
+      const tres = typeof attacker.takeDamage === 'function'
+        ? attacker.takeDamage(oathThorns, 'physical', player)
+        : null;
+      if (!tres) attacker.hp = Math.max(0, attacker.hp - oathThorns);
       this.broadcast({
         type: 'floating_text',
-        text: 'DODGED!',
-        x: player.x,
-        z: player.z,
-        style: 'combo'
+        text: `🛡️ OATH THORNS ${oathThorns}`,
+        x: attacker.x,
+        z: attacker.z,
+        style: 'crit'
       });
-      return;
+      if ((tres && tres.isDead) || (!tres && attacker.hp <= 0)) this.handleEntityDeath(attacker, player);
     }
-
-    if (ComboEngine.hasStatus(player, 'shielded')) {
-      amount = Math.round(amount * 0.4);
-    }
-
-    player.hp = Math.max(0, player.hp - amount);
-    player.stats.damageTaken += amount;
-
-    if (player.hp <= 0) {
-      player.isDowned = true;
-      player.downedTimer = 30;
-      this.broadcast({
-        type: 'player_downed',
-        playerId: player.id,
-        playerName: player.name,
-        x: player.x,
-        z: player.z
-      });
-      this.broadcast({
-        type: 'narrator_announcement',
-        text: `${player.name} has fallen! Step into their glyph to revive!`,
-        tone: 'danger'
-      });
-    }
+    return res;
   }
 
   updateGroundEffects(dt) {
@@ -1958,9 +2143,12 @@ class Room {
 
       // Sanctuary healing
       if (eff.type === 'sanctuary') {
+        const sanctuarySource = eff.sourcePlayerId ? this.players[eff.sourcePlayerId] : null;
         for (const p of Object.values(this.players)) {
           if (!p.isDowned && !p.isDead && Math.hypot(p.x - eff.x, p.z - eff.z) <= eff.radius) {
-            p.hp = Math.min(p.maxHp, p.hp + eff.healPerSec * dt);
+            const rawSanct = eff.healPerSec * dt;
+            const sanctAmt = this.systems?.oaths?.onHeal(this, sanctuarySource, p, rawSanct) ?? rawSanct;
+            Health.healPlayer(this, p.id, sanctAmt, 'Sanctuary');
           }
         }
       }
@@ -1976,8 +2164,7 @@ class Room {
     const s = item.stats || {};
     if (s.damageBuff) player.damageBuff = +(player.damageBuff + s.damageBuff).toFixed(2);
     if (s.maxHp) {
-      player.maxHp += s.maxHp;
-      player.hp = Math.min(player.maxHp, player.hp + s.maxHp);
+      Health.setMaxHp(this, player.id, player.maxHp + s.maxHp);
     }
     if (s.critChance) player.critChance = +((player.critChance || 0.18) + s.critChance).toFixed(2);
     if (s.lifesteal) player.lifesteal = +((player.lifesteal || 0) + s.lifesteal).toFixed(2);
@@ -2032,17 +2219,22 @@ class Room {
         if (distAfterMagnet <= pickupRadius) {
           loot.pickedUp = true;
           if (loot.type === 'gold') {
-            p.stats.goldCollected += loot.value;
+            // Phase 2: Silent Coin doubles gold (modifyGoldPickup).
+            const goldAmt = this.systems?.oaths?.modifyGoldPickup(p, loot.value) ?? loot.value;
+            p.stats.goldCollected += goldAmt;
             this.broadcast({
               type: 'loot_collected',
               playerId: p.id,
               playerName: p.name,
               lootType: 'gold',
-              value: loot.value,
+              value: goldAmt,
               lootId: loot.id
             });
+          } else if (loot.type === 'objective_relic') {
+            // Phase 2: objective relics go to the Objectives coordinator.
+            this.systems?.objectives?.onRelicPickup(this, p.id, loot);
           } else if (loot.type === 'potion_health') {
-            p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.5));
+            Health.healPlayer(this, p.id, Math.round(p.maxHp * 0.5), 'Elixir');
             this.broadcast({
               type: 'loot_collected',
               playerId: p.id,
@@ -2057,7 +2249,7 @@ class Room {
           } else if (loot.type === 'treasure_chest') {
             p.stats.goldCollected += loot.value;
             this.totalGoldDropped += loot.value;
-            p.hp = Math.min(p.maxHp, p.hp + Math.round(p.maxHp * 0.35));
+            Health.healPlayer(this, p.id, Math.round(p.maxHp * 0.35), 'Treasure Chest');
             const chestItem = LootGenerator.generateItem(this.floor, 'chest');
             this.equipProceduralItem(p, chestItem);
             this.spawnFloorLoot('gold', loot.x - 1.2, loot.z + 0.8, 35);
@@ -2089,8 +2281,7 @@ class Room {
           } else if (loot.type === 'relic_talisman') {
             for (const ally of Object.values(this.players)) {
               ally.cooldownHaste = +(ally.cooldownHaste + 0.30).toFixed(2);
-              ally.maxHp += 250;
-              ally.hp = Math.min(ally.maxHp, ally.hp + 250);
+              Health.setMaxHp(this, ally.id, ally.maxHp + 250);
               ally.equipment.relics.push("Malthor's Astral Phylactery (+30% Haste, +250 HP)");
             }
             this.broadcast({
@@ -2103,7 +2294,7 @@ class Room {
             for (const ally of Object.values(this.players)) {
               if (!ally.isDead) {
                 ally.damageBuff = +(ally.damageBuff + 0.25).toFixed(2);
-                ally.hp = Math.min(ally.maxHp, ally.hp + Math.round(ally.maxHp * 0.5));
+                Health.healPlayer(this, ally.id, Math.round(ally.maxHp * 0.5), 'Blood Shrine');
               }
             }
             this.broadcast({
@@ -2121,8 +2312,8 @@ class Room {
             this.warHornAvailable = true;
             for (const ally of Object.values(this.players)) {
               if (!ally.isDead) {
-                ally.maxHp = Math.round(ally.maxHp * 1.3);
-                ally.hp = Math.min(ally.maxHp, ally.hp + Math.round(ally.maxHp * 0.65));
+                Health.setMaxHp(this, ally.id, Math.round(ally.maxHp * 1.3));
+                Health.healPlayer(this, ally.id, Math.round(ally.maxHp * 0.65), 'Astral Aegis');
               }
             }
             this.broadcast({
@@ -2146,50 +2337,32 @@ class Room {
     this.floorLoot = this.floorLoot.filter(l => !l.pickedUp);
   }
 
+  // Phase 2: legacy per-player XP replaced by Progression.grantPartyXP
+  // (level-ups, ability points, broadcasts owned there).
   awardPartyXP(xpAmount) {
-    for (const p of Object.values(this.players)) {
-      if (p.isDead) continue;
-      p.xp += xpAmount;
-      while (p.xp >= p.nextLevelXp) {
-        p.xp -= p.nextLevelXp;
-        p.level += 1;
-        p.nextLevelXp = Math.round(p.nextLevelXp * 1.45);
-        p.maxHp = Math.round(p.maxHp * 1.18);
-        p.hp = p.maxHp;
-        p.damageBuff = +(p.damageBuff + 0.15).toFixed(2);
-
-        if (!p.isBot) {
-          this.broadcast({
-            type: 'level_up',
-            playerId: p.id,
-            playerName: p.name,
-            level: p.level,
-            x: p.x,
-            z: p.z
-          });
-          this.broadcast({
-            type: 'floating_text',
-            text: `⭐ LEVEL UP! LV. ${p.level} (+18% HP, +15% DMG)`,
-            x: p.x,
-            z: p.z,
-            style: 'combo'
-          });
-        }
-      }
-    }
+    return Progression.grantPartyXP(this, xpAmount, 'kill');
   }
 
   handleEntityDeath(entity, killer) {
-    if (entity.isDead) return;
+    // Phase 2: bosses set isDead=true inside their own takeDamage, so guard on
+    // an explicit handled flag instead of isDead (single execution).
+    if (entity.deathHandled) return;
+    entity.deathHandled = true;
     entity.isDead = true;
+
+    // Phase 2 FIRST: a slain Nemesis drops its bonus loot before anything else.
+    if (entity.isNemesis) {
+      this.systems?.nemesis?.onNemesisSlain(this, entity, killer);
+    }
 
     // Register corpse for Necromancer Corpse Explosion
     this.corpses.push({ x: entity.x, z: entity.z, time: Date.now() });
 
     // Award Party XP & Spawn Loot
     const isElite = (entity.type === 'elite_executioner' || entity.type === 'elite_lich');
-    const isBoss = (entity.id === 'boss_malakor');
-    this.awardPartyXP(isBoss ? 1000 : (isElite ? 250 : 45));
+    const isBoss = (entity.isBoss || entity.id === 'boss_malakor');
+    // Phase 2: XP routed through Progression with kill reason.
+    Progression.grantPartyXP(this, isBoss ? 1000 : (isElite ? 250 : 45), isBoss ? 'boss' : (isElite ? 'elite' : 'kill'));
 
     const goldDrop = isElite ? 150 : Math.floor(15 + Math.random() * 25);
     this.spawnFloorLoot('gold', entity.x, entity.z, goldDrop);
@@ -2273,10 +2446,16 @@ class Room {
     });
 
     // If it was the boss
-    if (entity.id === 'boss_malakor') {
+    if (entity.isBoss || entity.id === 'boss_malakor') {
       if (killer) killer.stats.killingBlowBoss = true;
       this.triggerBossDefeated(killer);
     }
+
+    // Phase 2 end-of-death hooks: objective kill credit, oath kill tracking,
+    // living-dungeon kill memory.
+    this.systems?.objectives?.onEnemyKilled(this, entity, killer);
+    this.systems?.oaths?.onKill(this, entity, killer);
+    this.systems?.livingDungeon?.recordKill(this, entity, killer);
   }
 
   triggerBossDefeated(killer) {
@@ -2532,6 +2711,15 @@ class Room {
     return closest;
   }
 
+  // Phase 2: resolve a lethal hit on a mob. A Nemesis-arc elite may flee on its
+  // first lethal blow (tryLethalEscape returns true = death handling skipped);
+  // all other cases run normal death handling.
+  _resolveMobLethal(mob, killer) {
+    if (!mob || mob.deathHandled || mob.hp > 0) return;
+    if (mob.isElite && this.systems?.nemesis?.tryLethalEscape(this, mob, killer)) return;
+    this.handleEntityDeath(mob, killer);
+  }
+
   dealAreaDamage(attacker, x, z, radius, damage, damageType, extra = {}) {
     const buffMult = (attacker && attacker.damageBuff) ? attacker.damageBuff : 1.0;
     const critChance = (attacker ? (attacker.critChance || 0.18) + (attacker.overdrive ? 0.25 : 0) : 0);
@@ -2539,11 +2727,23 @@ class Room {
     const critMult = isCrit ? 1.75 : 1.0;
     const scaledDmg = Math.round(damage * buffMult * critMult);
 
+    // Phase 2: objective shrines take real damage from area blasts.
+    this.systems?.objectives?.damageShrinesAt(this, x, z, radius, scaledDmg, damageType);
+
     // Check Boss
     if (this.boss && !this.boss.isDead) {
       if (Math.hypot(this.boss.x - x, this.boss.z - z) <= radius + this.boss.radius) {
-        const res = this.boss.takeDamage(scaledDmg, damageType, attacker);
-        if (attacker && res.damageDealt) attacker.stats.damageDealt += res.damageDealt;
+        // Phase 2: soul-seal ward + living dungeon resist on boss damage taken.
+        const seals = this.boss.sealsRemaining ?? 2;
+        const wardMult = seals === 2 ? 0.50 : (seals === 1 ? 0.75 : 1.20);
+        const bossMult = (this.systems?.livingDungeon?.getDamageTakenMult(this.boss, damageType) ?? 1) * wardMult;
+        const res = this.boss.takeDamage(Math.round(scaledDmg * bossMult), damageType, attacker);
+        if (attacker && res.damageDealt) {
+          attacker.stats.damageDealt += res.damageDealt;
+          this.systems?.nemesis?.onMobDamaged(this, this.boss, attacker, res.damageDealt);
+          this.systems?.livingDungeon?.recordDamage(this, attacker, res.damageDealt, damageType);
+          this.systems?.oaths?.recordDamageDealt(this, attacker.id, res.damageDealt);
+        }
         if (isCrit && attacker && !attacker.isBot) {
           this.broadcast({ type: 'floating_text', text: `💥 CRIT! -${res.damageDealt}`, x: this.boss.x, z: this.boss.z, style: 'crit' });
         }
@@ -2565,7 +2765,7 @@ class Room {
         if (isCrit && attacker && !attacker.isBot) {
           this.broadcast({ type: 'floating_text', text: `💥 CRIT! -${res.damageDealt || scaledDmg}`, x: m.x, z: m.z, style: 'crit' });
         }
-        if (m.hp <= 0) this.handleEntityDeath(m, attacker);
+        this._resolveMobLethal(m, attacker);
       }
     }
   }
@@ -2577,13 +2777,24 @@ class Room {
     const isCrit = Math.random() < critChance;
     const critMult = isCrit ? 1.75 : 1.0;
     const scaledDmg = Math.round(damage * buffMult * critMult);
-    const res = target.takeDamage ? target.takeDamage(scaledDmg, damageType, attacker) : { damageDealt: scaledDmg };
+    // Phase 2: boss soul-seal ward + living dungeon resist on direct boss hits.
+    let dealtAmt = scaledDmg;
+    if (target === this.boss) {
+      const seals = this.boss.sealsRemaining ?? 2;
+      const wardMult = seals === 2 ? 0.50 : (seals === 1 ? 0.75 : 1.20);
+      dealtAmt = Math.round(scaledDmg * wardMult * (this.systems?.livingDungeon?.getDamageTakenMult(this.boss, damageType) ?? 1));
+    }
+    const res = target.takeDamage ? target.takeDamage(dealtAmt, damageType, attacker) : { damageDealt: scaledDmg };
     if (!target.takeDamage && target.hp !== undefined) target.hp = Math.max(0, target.hp - scaledDmg);
     if (attacker) attacker.stats.damageDealt += (res.damageDealt || scaledDmg);
     if (isCrit && attacker && !attacker.isBot) {
       this.broadcast({ type: 'floating_text', text: `💥 CRIT! -${res.damageDealt || scaledDmg}`, x: target.x, z: target.z, style: 'crit' });
     }
-    if (target.hp <= 0) this.handleEntityDeath(target, attacker);
+    this._resolveMobLethal(target, attacker);
+    // Phase 2: objective shrines take real damage from direct strikes.
+    if (target && typeof target.x === 'number') {
+      this.systems?.objectives?.damageShrinesAt(this, target.x, target.z, 1.5, scaledDmg, damageType);
+    }
   }
 
   applyAreaStatus(source, x, z, radius, statusName, duration) {
@@ -2610,8 +2821,9 @@ class Room {
       for (const ally of Object.values(this.players)) {
         if (ally.id !== player.id && !ally.isDowned && !ally.isDead) {
           if (Math.hypot(ally.x - rx, ally.z - rz) < width) {
-            ally.hp = Math.min(ally.maxHp, ally.hp + healAlly);
-            player.stats.healingDone += healAlly;
+            const healAmt = this.systems?.oaths?.onHeal(this, player, ally, healAlly) ?? healAlly;
+            const healed = Health.healPlayer(this, ally.id, healAmt, 'Healing Beam');
+            player.stats.healingDone += healed;
           }
         }
       }
@@ -2693,9 +2905,10 @@ class Room {
         shardsEarned: p.stats.shardsEarned || 0,
         classKey: p.classKey,
         role: p.role,
-        level: p.level || 1,
-        xp: p.xp || 0,
-        nextLevelXp: p.nextLevelXp || 100,
+        // Phase 2: Health + Progression snapshot fields (respawn timers,
+        // ability points, build). Later spreads win on level/xp/nextLevelXp.
+        ...Health.snapshotFields(p),
+        ...Progression.snapshotFields(p),
         gold: p.stats.goldCollected || 0,
         damageBuff: p.damageBuff || 1.0,
         lifesteal: p.lifesteal || 0,
@@ -2713,20 +2926,50 @@ class Room {
         isBot: p.isBot,
         downedTimer: p.downedTimer,
         reviveProgress: p.reviveProgress,
-        statuses: p.statuses
+        statuses: p.statuses,
+        // Phase 2: oath state for HUD badges.
+        oathState: p.oathState || { oaths: [] }
       })),
       boss: this.boss ? this.boss.getState() : null,
+      // Phase 2 (enemies/PROTOCOL.md): mob sync payload for client
+      // EnemyVisuals.syncElites.
       mobs: this.mobs.filter(m => !m.isDead).map(m => ({
         id: m.id,
         type: m.type,
+        role: m.role,
         name: m.name,
+        biome: m.biome,
+        biomeTint: m.biomeTint,
+        model: m.model,
+        modelScale: m.modelScale,
         x: m.x,
         y: m.y,
         z: m.z,
         hp: m.hp,
         maxHp: m.maxHp,
+        damage: m.damage,
+        isElite: !!m.isElite,
+        affixes: m.affixes || [],
+        auraColor: m.auraColor,
+        stealthed: !!m.stealthed,
         statuses: m.statuses
       })),
+      // Phase 2: oath shrines + objectives + signature state (SIGNATURE_PROTOCOL §2.7).
+      shrines: (this.shrines || []).map(s => ({
+        id: s.id,
+        type: s.type,
+        x: s.x,
+        z: s.z,
+        hp: s.hp,
+        maxHp: s.maxHp,
+        offers: s.offers || []
+      })),
+      objectives: this.systems?.objectives?.getSnapshot?.() || null,
+      signature: {
+        oaths: this.systems?.oaths?.getPublicState(this) || null,
+        livingDungeon: this.systems?.livingDungeon?.getPublicState(this) || null,
+        nemesis: this.systems?.nemesis?.getPublicState(this) || null
+      },
       projectiles: this.projectiles.map(pr => ({
         id: pr.id,
         x: pr.x,

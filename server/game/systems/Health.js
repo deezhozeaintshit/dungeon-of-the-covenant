@@ -159,7 +159,11 @@ function _enterDowned(room, player) {
   player.isDowned = true;
   player.isDead = false;
   player.state = 'downed';
-  player.downedTimer = DOWNED_DURATION_SEC;
+  // Phase 2: Ashen Martyr oath halves the bleed-out timer (sworn burn faster).
+  const oaths = (player.oathState && player.oathState.oaths) || [];
+  player.downedTimer = oaths.includes('ashen_martyr')
+    ? DOWNED_DURATION_SEC / 2
+    : DOWNED_DURATION_SEC;
   player.respawnTimer = 0;
   room.broadcast({
     type: 'player_downed',
