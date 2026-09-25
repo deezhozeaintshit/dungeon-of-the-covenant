@@ -51,6 +51,7 @@ import { initSeasonPass } from './ui/seasonPass.js';
 // (tier + affix icons), and tier-clear banner. Display-only; the server is
 // authoritative for affixes, scaling, unlocks, and keystones.
 import { initRiftUI } from './ui/riftUI.js';
+import { initCovenUI } from './ui/covenUI.js';
 // Phase 3: server-authoritative loot inventory + equipment panel (workstream 2).
 import { initInventoryPanel } from './ui/inventory.js';
 
@@ -426,6 +427,25 @@ class GameApp {
       riftGateBtn.addEventListener('click', () => this.riftUI.open());
     }
 
+    // Phase 4 covens (workstream 2): fellowship lifecycle, ranks, shared
+    // progression, weekly rite war, and coven whispers. Server-authoritative;
+    // the client only renders state. Live whispers ride the ws subscriber map.
+    this.covenUI = initCovenUI({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      getAuthToken: () => this.authToken
+    });
+    if (this.covenUI && this.covenUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.covenUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
+    }
+    const covenBtn = document.getElementById('btn-coven');
+    if (covenBtn && this.covenUI) {
+      covenBtn.addEventListener('click', () => this.covenUI.open());
+    }
+    this.covenUI.refresh();
+
     // Phase 3: server-authoritative inventory + equipment (workstream 2).
     // The panel is display-only; equip/unequip send id/slot to the server,
     // which validates and broadcasts the authoritative inventory_update.
@@ -707,6 +727,9 @@ class GameApp {
           if (this.metaUI) this.metaUI.refresh();
           // Phase 4: refresh season pass / banner state for the new session.
           if (this.seasonUI) this.seasonUI.refresh();
+          // Phase 4 (workstream 2): refresh coven state and (re)subscribe to
+          // the live coven channel for the new session.
+          if (this.covenUI) { this.covenUI.refresh(); this.covenUI.onConnect(); }
         } else {
           if (badge) badge.innerText = `⚠️ ${data?.error || 'Auth failed'}`;
         }
@@ -1233,6 +1256,9 @@ class GameApp {
           this.ui.screens.loading.hide();
           document.getElementById('lobby-screen')?.classList.remove('hidden');
         }
+        // Phase 4 (workstream 2): (re)subscribe to the coven live channel —
+        // whispers and rite updates arrive over ws once the account links.
+        if (this.covenUI && this.covenUI.onConnect) this.covenUI.onConnect();
       },
       on_disconnect: () => {
         const badge = document.getElementById('connection-status-badge');

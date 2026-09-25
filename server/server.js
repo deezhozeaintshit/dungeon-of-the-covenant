@@ -370,6 +370,194 @@ app.get('/api/leaderboards/:board', (req, res) => {
   res.json({ ok: true, ...result });
 });
 
+// ===========================================================================
+// PHASE 4 (workstream 2): COVENS — lifecycle, ranks, progression, race, chat.
+// All endpoints are server-authoritative; the client only renders state.
+// ===========================================================================
+const CovenService = require('./game/systems/CovenService');
+
+function covenAccount(req, res) {
+  const acc = authService.getAccountByToken(metaToken(req));
+  if (!acc) {
+    res.status(401).json({ ok: false, error: 'Session expired or not logged in.' });
+    return null;
+  }
+  return acc;
+}
+
+// Live coven websocket subscribers: covenId -> Set<ws>. Used for coven chat
+// delivery and coven_update pushes after mutations.
+const covenSubscribers = new Map(); // covenId -> Set<ws>
+const covenSocketCoven = new Map(); // ws -> covenId
+
+function broadcastToCoven(covenId, messageObj) {
+  const subs = covenSubscribers.get(covenId);
+  if (!subs || subs.size === 0) return;
+  const payload = JSON.stringify(messageObj);
+  for (const clientWs of subs) {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(payload);
+  }
+}
+
+function unsubscribeCovenSocket(ws) {
+  const covenId = covenSocketCoven.get(ws);
+  if (!covenId) return;
+  covenSocketCoven.delete(ws);
+  const subs = covenSubscribers.get(covenId);
+  if (subs) {
+    subs.delete(ws);
+    if (subs.size === 0) covenSubscribers.delete(covenId);
+  }
+}
+
+// Push the fresh public coven state to every online subscriber (roster,
+// ranks, XP). Called after every coven mutation below.
+function notifyCoven(covenId) {
+  const subs = covenSubscribers.get(covenId);
+  if (!subs || subs.size === 0) return;
+  const store = CovenService; // fresh public view per socket below
+  for (const clientWs of [...subs]) {
+    try {
+      const meta = socketMeta.get(clientWs);
+      const uname = meta && meta.accountUsername;
+      if (!uname) continue;
+      const state = store.getCovenState({ username: uname });
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ type: 'coven_update', ...state }));
+      }
+    } catch (e) { /* never break on a push */ }
+  }
+}
+
+app.get('/api/coven/state', (req, res) => {
+  const acc = authService.getAccountByToken(metaToken(req));
+  // Race standings are public (glory is meant to be seen); roster detail
+  // needs a session.
+  const uname = acc ? acc.username : null;
+  res.json(CovenService.getCovenState({ username: uname }));
+});
+
+app.post('/api/coven/create', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.createCoven({
+    username: acc.username,
+    displayName: acc.profile.displayName || acc.username,
+    name: req.body?.name,
+    tagline: req.body?.tagline
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/join', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.joinByCode({
+    username: acc.username,
+    displayName: acc.profile.displayName || acc.username,
+    code: req.body?.code
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/leave', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const covenId = CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.leaveCoven({ username: acc.username });
+  if (!result.ok) return res.status(400).json(result);
+  if (covenId) notifyCoven(covenId);
+  res.json(result);
+});
+
+app.post('/api/coven/disband', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const covenId = CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.disbandCoven({ username: acc.username });
+  if (!result.ok) return res.status(400).json(result);
+  if (covenId) {
+    broadcastToCoven(covenId, { type: 'coven_disbanded', covenId, covenName: result.covenName });
+    for (const clientWs of [...(covenSubscribers.get(covenId) || [])]) unsubscribeCovenSocket(clientWs);
+  }
+  res.json(result);
+});
+
+app.post('/api/coven/promote', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.setRank({
+    actorUsername: acc.username,
+    targetUsername: req.body?.username,
+    rank: 'officer'
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/demote', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.setRank({
+    actorUsername: acc.username,
+    targetUsername: req.body?.username,
+    rank: 'member'
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/kick', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const target = (req.body?.username || '').toLowerCase().trim();
+  const covenId = CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.kickMember({ actorUsername: acc.username, targetUsername: target });
+  if (!result.ok) return res.status(400).json(result);
+  if (covenId) notifyCoven(covenId);
+  res.json(result);
+});
+
+app.post('/api/coven/invite/rotate', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.rotateInviteCode({ username: acc.username });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.get('/api/coven/race', (req, res) => {
+  res.json(CovenService.getWeeklyRace());
+});
+
+app.get('/api/coven/chat', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const covenId = req.query.covenId || CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.getChat(covenId, req.query.after || 0, acc.username);
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.post('/api/coven/chat', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.sendChat({
+    username: acc.username,
+    displayName: acc.profile.displayName || acc.username,
+    text: req.body?.text
+  });
+  if (!result.ok) return res.status(400).json(result);
+  broadcastToCoven(result.covenId, { type: 'coven_chat', covenId: result.covenId, message: result.message });
+  res.json(result);
+});
+
 // ============================================================================
 // 3. STATIC CLIENT & THREE.JS ADDONS HOSTING
 // ============================================================================
@@ -453,6 +641,8 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    // PHASE 4 (workstream 2): drop coven live-channel subscription.
+    unsubscribeCovenSocket(ws);
     const meta = socketMeta.get(ws);
     if (meta && meta.roomCode) {
       const room = rooms.get(meta.roomCode);
@@ -957,6 +1147,57 @@ function handleClientMessage(ws, socketId, data) {
         text: `🌀 ${player.name} descends into RIFT TIER ${v.tier}! Affixes: ${Rift.publicAffixes(v.tier).map(a => `${a.icon} ${a.name}`).join(' · ')}`,
         tone: 'danger'
       });
+      break;
+    }
+
+    // PHASE 4 (workstream 2): coven live channel. Subscribers receive
+    // 'coven_chat' whispers and 'coven_update' roster/XP pushes for their
+    // coven. Auth resolved from the account token, never trusted from the
+    // client. Chat text is validated and stored by CovenService (last 100
+    // per coven, rate-limited, length-capped).
+    case 'coven_subscribe': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'coven_subscribe', ok: false, reason: 'Link your account to hear your coven.' }));
+        return;
+      }
+      const covenId = CovenService.getCovenIdForUser(acc.username);
+      if (!covenId) {
+        ws.send(JSON.stringify({ type: 'coven_subscribe', ok: false, reason: 'no_coven' }));
+        return;
+      }
+      unsubscribeCovenSocket(ws);
+      const meta = socketMeta.get(ws) || {};
+      meta.accountUsername = acc.username;
+      socketMeta.set(ws, meta);
+      if (!covenSubscribers.has(covenId)) covenSubscribers.set(covenId, new Set());
+      covenSubscribers.get(covenId).add(ws);
+      covenSocketCoven.set(ws, covenId);
+      ws.send(JSON.stringify({
+        type: 'coven_subscribe',
+        ok: true,
+        covenId,
+        state: CovenService.getCovenState({ username: acc.username })
+      }));
+      break;
+    }
+
+    case 'coven_chat': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'coven_chat', ok: false, reason: 'Link your account to whisper.' }));
+        return;
+      }
+      const result = CovenService.sendChat({
+        username: acc.username,
+        displayName: acc.profile.displayName || acc.username,
+        text: data.text
+      });
+      if (!result.ok) {
+        ws.send(JSON.stringify({ type: 'coven_chat', ok: false, reason: result.error }));
+        return;
+      }
+      broadcastToCoven(result.covenId, { type: 'coven_chat', covenId: result.covenId, message: result.message });
       break;
     }
   }

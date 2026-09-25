@@ -421,12 +421,25 @@ function grantRunRewards(room, { victory = false } = {}) {
     m.lifetimeRuns += 1;
     if (victory) m.lifetimeVictories += 1;
 
+    // PHASE 4 (workstream 2): coven XP — shared coven progression fed by the
+    // same server-computed account XP. Level-ups are reported on the reward
+    // row so the client can toast them. Never breaks run rewards.
+    let covenGain = null;
+    try {
+      const CovenService = require('./CovenService');
+      covenGain = CovenService.awardRunXp(player.accountUsername, rewards.accountXp, { victory });
+    } catch (e) { /* coven systems must never break run rewards */ }
+
     const newRank = rankForXp(m.accountXp);
     results.push({
       playerId: player.id,
       name: player.name,
       accountXpGained: rewards.accountXp,
       sealsGained: rewards.seals,
+      covenXpGained: covenGain ? covenGain.xpGained : 0,
+      covenLevelUp: covenGain ? covenGain.leveledUp : false,
+      covenName: covenGain ? covenGain.covenName : null,
+      covenLevelName: covenGain ? covenGain.levelName : null,
       victory,
       rankUp: newRank.index > oldRank.index,
       rank: { index: newRank.index, name: newRank.name, icon: newRank.icon },

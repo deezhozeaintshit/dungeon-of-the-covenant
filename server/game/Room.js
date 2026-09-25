@@ -2762,6 +2762,25 @@ class Room {
         }
       } catch (e) { /* leaderboards must never break the victory flow */ }
     }
+
+    // PHASE 4 (workstream 2): coven-vs-coven weekly race. Best clear time per
+    // coven per week, server-measured (same durationSec as the leaderboard
+    // above). Only the daily seeded delve feeds the rite war.
+    if (this.isDailyDelve) {
+      try {
+        const CovenService = require('./systems/CovenService');
+        const humans = Object.values(this.players || {})
+          .filter(p => !p.isBot && p.accountUsername);
+        for (const p of humans) {
+          CovenService.recordDailyDelveClear(
+            p.accountUsername,
+            durationSec,
+            this.dailyDate || null,
+            this.dailySeed != null ? this.dailySeed : null
+          );
+        }
+      } catch (e) { /* coven race must never break the victory flow */ }
+    }
   }
 
   recordPotgCandidate(type, hero, description) {
