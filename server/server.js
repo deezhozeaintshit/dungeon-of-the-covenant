@@ -131,7 +131,9 @@ function generateRoomCode() {
 
 function findOrCreateQuickplayRoom() {
   // Find any active room with fewer than 8 human players so random people get thrown into a match together!
+  // Private rooms are skipped: quickplay never throws strangers into a private chamber.
   for (const [code, room] of rooms.entries()) {
+    if (room.isPrivate) continue;
     const humanCount = Object.values(room.players).filter(p => !p.isBot).length;
     if (humanCount < 8 && room.state !== 'completed') {
       return { roomCode: code, room, isNew: false };
@@ -178,6 +180,33 @@ wss.on('connection', (ws) => {
 
 function handleClientMessage(ws, socketId, data) {
   switch (data.type) {
+    // NEW (Phase 2): Lobby browser — list joinable public rooms, newest first.
+    case 'list_rooms': {
+      const MAX_PLAYERS = 8;
+      const list = [];
+      const entries = Array.from(rooms.entries()).reverse(); // newest first
+      for (const [code, room] of entries) {
+        if (list.length >= 20) break;
+        if (room.isPrivate) continue; // private chambers are invite-only
+        if (room.state !== 'lobby' && room.state !== 'dungeon') continue; // never list completed rooms
+        const players = Object.values(room.players || {});
+        const humanCount = players.filter(p => !p.isBot).length;
+        list.push({
+          code,
+          playerCount: humanCount,
+          maxPlayers: MAX_PLAYERS,
+          biome: (room.proceduralConfig && room.proceduralConfig.biome && room.proceduralConfig.biome.name) || 'Uncharted Depths',
+          biomeId: (room.proceduralConfig && room.proceduralConfig.biome && room.proceduralConfig.biome.id) || null,
+          floor: room.floor || 1,
+          state: room.state,
+          ageSec: Math.round((Date.now() - (room.createdAt || Date.now())) / 1000),
+          hasBots: players.some(p => p.isBot)
+        });
+      }
+      ws.send(JSON.stringify({ type: 'room_list', rooms: list }));
+      break;
+    }
+
     // NEW: Instant Quickplay Auto-Matchmaking — throws players directly into a live randomly generated dungeon together!
     case 'quickplay_matchmaking': {
       const { roomCode, room, isNew } = findOrCreateQuickplayRoom();
@@ -280,6 +309,32 @@ function handleClientMessage(ws, socketId, data) {
         type: 'player_joined',
         player
       });
+      break;
+    }
+
+    // NEW (Phase 2): Create a private chamber — flagged private so it is
+    // excluded from room_list and skipped by quickplay matchmaking.
+    // Invite-only: friends join via join_room with the code (or invite link).
+    case 'create_private_room': {
+      const roomCode = generateRoomCode();
+      const room = new Room(roomCode);
+      room.isPrivate = true;
+
+      room.setBroadcastCallback((msg) => {
+        broadcastToRoom(roomCode, msg);
+      });
+
+      const player = room.addPlayer(socketId, data.playerName, data.chosenClass, false, data.profile);
+      rooms.set(roomCode, room);
+      socketMeta.set(ws, { roomCode, playerId: socketId });
+
+      ws.send(JSON.stringify({
+        type: 'room_created',
+        roomCode,
+        player,
+        room: room.getSnapshot(),
+        private: true
+      }));
       break;
     }
 

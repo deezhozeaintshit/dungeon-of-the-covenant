@@ -2,10 +2,30 @@
 export class NetworkClient {
   constructor(callbacks = {}) {
     this.callbacks = callbacks;
+    // Phase 2: secondary subscribers (UI modules) that do not own the primary
+    // callback map. handleMessage dispatches to primary callbacks first, then
+    // to every registered listener for the message type.
+    this.listeners = {};
     this.ws = null;
     this.connected = false;
     this.queue = [];
     this.connect();
+  }
+
+  // Subscribe an extra handler for a ws message type without disturbing the
+  // primary callback registered in the constructor.
+  on(type, cb) {
+    if (typeof cb !== 'function') return () => {};
+    if (!this.listeners[type]) this.listeners[type] = [];
+    this.listeners[type].push(cb);
+    return () => this.off(type, cb);
+  }
+
+  off(type, cb) {
+    const arr = this.listeners[type];
+    if (!arr) return;
+    const i = arr.indexOf(cb);
+    if (i !== -1) arr.splice(i, 1);
   }
 
   connect() {
@@ -58,6 +78,17 @@ export class NetworkClient {
     this.send({ type: 'create_room', playerName, chosenClass, profile });
   }
 
+  // Phase 2: private (invite-only) chamber — excluded from room_list and
+  // skipped by quickplay matchmaking.
+  createPrivateRoom(playerName, chosenClass, profile = null) {
+    this.send({ type: 'create_private_room', playerName, chosenClass, profile });
+  }
+
+  // Phase 2: ask the server for the public lobby browser list.
+  listRooms() {
+    this.send({ type: 'list_rooms' });
+  }
+
   joinRoom(roomCode, playerName, chosenClass, profile = null) {
     this.send({ type: 'join_room', roomCode, playerName, chosenClass, profile });
   }
@@ -80,7 +111,21 @@ export class NetworkClient {
 
   handleMessage(msg) {
     if (this.callbacks[msg.type]) {
-      this.callbacks[msg.type](msg);
+      try {
+        this.callbacks[msg.type](msg);
+      } catch (err) {
+        console.error(`[network] primary handler for ${msg.type} threw:`, err);
+      }
+    }
+    const extra = this.listeners[msg.type];
+    if (extra) {
+      for (const cb of extra.slice()) {
+        try {
+          cb(msg);
+        } catch (err) {
+          console.error(`[network] listener for ${msg.type} threw:`, err);
+        }
+      }
     }
   }
 }
