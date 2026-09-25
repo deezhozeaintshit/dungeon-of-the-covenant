@@ -238,6 +238,11 @@ app.use(express.static(path.join(__dirname, '..', 'client')));
 app.use('/vendor', express.static(path.join(__dirname, '..', 'node_modules', 'three', 'build')));
 app.use('/vendor/addons', express.static(path.join(__dirname, '..', 'node_modules', 'three', 'examples', 'jsm')));
 
+// Player documentation: serve the game guide at /docs
+app.get('/docs', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'client', 'docs.html'));
+});
+
 // ============================================================================
 // 4. REAL-TIME MULTIPLAYER ROOMS & INSTANT QUICKPLAY AUTO-MATCHMAKER
 // ============================================================================

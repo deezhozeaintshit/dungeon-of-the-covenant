@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dungeon of the Covenant — Official Game Guide</title>
+<meta name="description" content="The complete player guide to Dungeon of the Covenant: classes, biomes, enemies, loot, oaths, and how to play.">
+<style>
+  :root{
+    --bg:#0a0712; --bg2:#100a1c; --bg3:#171026;
+    --panel:rgba(16,11,28,.94); --line:rgba(212,175,55,.38);
+    --gold:#d4af37; --gold-hi:#ffd700; --gold-soft:#f2be5c;
+    --blood:#b91c1c; --blood-hi:#ef4444;
+    --ink:#ece2cc; --ink-dim:#b9ab8d; --ink-faint:#8a7d63;
+    --green:#2ecc71; --blue:#3ba4ff; --purple:#b845ff; --orange:#ff8c1a; --gray:#c0c6d4;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    line-height:1.65;font-size:16px}
+  .skip{position:absolute;left:-9999px;top:0;background:var(--gold);color:#000;padding:10px 16px;z-index:99;font-weight:700}
+  .skip:focus{left:8px;top:8px}
+  a{color:var(--gold-hi)}
+  a:focus-visible,button:focus-visible{outline:3px solid var(--gold-hi);outline-offset:2px}
+  header.hero{background:radial-gradient(ellipse at 50% -10%,#2a1440 0%,var(--bg) 65%);
+    border-bottom:1px solid var(--line);padding:56px 20px 36px;text-align:center}
+  .kicker{letter-spacing:4px;color:var(--gold);font-size:12px;text-transform:uppercase}
+  h1{font-family:Cinzel,"Times New Roman",Georgia,serif;font-size:clamp(30px,5vw,52px);
+    margin:12px 0 8px;color:var(--gold-hi);text-shadow:0 0 24px rgba(212,175,55,.35)}
+  .tagline{color:var(--ink-dim);max-width:640px;margin:0 auto;font-size:17px}
+  nav.toc{max-width:980px;margin:0 auto;padding:26px 20px 6px}
+  nav.toc h2{font-size:13px;letter-spacing:3px;color:var(--ink-faint);text-transform:uppercase;margin:0 0 10px}
+  nav.toc ul{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:8px}
+  nav.toc a{display:inline-block;padding:7px 14px;border:1px solid var(--line);border-radius:999px;
+    color:var(--ink);text-decoration:none;font-size:14px;background:var(--panel)}
+  nav.toc a:hover{border-color:var(--gold-hi);color:var(--gold-hi)}
+  main{max-width:980px;margin:0 auto;padding:10px 20px 60px}
+  section{margin:44px 0;padding:28px;background:var(--panel);border:1px solid var(--line);border-radius:12px}
+  h2.sec{font-family:Cinzel,"Times New Roman",Georgia,serif;color:var(--gold-hi);
+    font-size:26px;margin:0 0 4px;letter-spacing:1px}
+  .sec-sub{color:var(--ink-faint);font-size:14px;margin:0 0 18px;font-style:italic}
+  h3{color:var(--gold-soft);font-size:18px;margin:24px 0 8px}
+  p{margin:10px 0}
+  ul,ol{margin:10px 0;padding-left:22px}
+  li{margin:6px 0}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:15px}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid rgba(212,175,55,.18);vertical-align:top}
+  th{color:var(--gold);letter-spacing:1px;font-size:13px;text-transform:uppercase}
+  .card-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px;margin:14px 0}
+  .card{background:var(--bg2);border:1px solid rgba(212,175,55,.22);border-radius:10px;padding:16px}
+  .card h4{margin:0 0 4px;color:var(--gold-hi);font-size:16px}
+  .card .role{font-size:12px;letter-spacing:2px;color:var(--ink-faint);text-transform:uppercase}
+  .card p{font-size:14px;color:var(--ink-dim);margin:8px 0}
+  .card ul{font-size:13.5px;color:var(--ink-dim);margin:6px 0;padding-left:18px}
+  .badge{display:inline-block;font-size:11px;letter-spacing:1.5px;padding:3px 10px;border-radius:999px;
+    border:1px solid var(--line);color:var(--gold);text-transform:uppercase;margin-bottom:6px}
+  .r-common{color:var(--gray)} .r-uncommon{color:var(--green)} .r-rare{color:var(--blue)}
+  .r-epic{color:var(--purple)} .r-legendary{color:var(--orange)}
+  .oath{border-left:3px solid var(--blood-hi);padding:4px 0 4px 16px;margin:18px 0}
+  .oath h4{margin:0 0 4px;color:var(--ink)}
+  .oath .term{color:var(--ink-faint);font-size:13.5px;font-style:italic}
+  .oath .cost{color:var(--blood-hi);font-weight:600}
+  .oath .benefit{color:var(--green);font-weight:600}
+  .callout{border:1px solid var(--gold);border-radius:10px;padding:14px 18px;margin:16px 0;
+    background:rgba(212,175,55,.07)}
+  .callout strong{color:var(--gold-hi)}
+  .kbd{display:inline-block;min-width:26px;text-align:center;padding:2px 8px;margin:1px;
+    border:1px solid var(--line);border-bottom-width:3px;border-radius:6px;background:var(--bg3);
+    color:var(--gold-hi);font-family:ui-monospace,monospace;font-size:13px}
+  footer{border-top:1px solid var(--line);padding:28px 20px;text-align:center;color:var(--ink-faint);font-size:14px}
+  .orn{display:flex;align-items:center;gap:10px;margin:6px 0 18px}
+  .orn::before,.orn::after{content:"";height:1px;flex:1;background:linear-gradient(90deg,transparent,var(--line),transparent)}
+  .orn span{color:var(--gold)}
+  @media (max-width:640px){ section{padding:20px 16px} table{font-size:14px} }
+  @media (prefers-reduced-motion:reduce){ html{scroll-behavior:auto} }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to guide content</a>
+
+<header class="hero">
+  <div class="kicker">The Official Player Guide</div>
+  <h1>DUNGEON OF THE COVENANT</h1>
+  <p class="tagline">A real-time multiplayer dungeon crawler for 2 to 8 players. Descend together, swear dark oaths, slay biome wardens, and loot the deep.</p>
+</header>
+
+<nav class="toc" aria-label="Guide contents">
+  <h2>Contents</h2>
+  <ul>
+    <li><a href="#basics">The Basics</a></li>
+    <li><a href="#controls">Controls</a></li>
+    <li><a href="#classes">Hero Classes</a></li>
+    <li><a href="#biomes">Biomes</a></li>
+    <li><a href="#enemies">Enemies &amp; Bosses</a></li>
+    <li><a href="#combat">Combat, XP &amp; Abilities</a></li>
+    <li><a href="#loot">Loot &amp; Gear</a></li>
+    <li><a href="#oaths">Covenant Oaths</a></li>
+    <li><a href="#living">Living Dungeon &amp; Nemesis</a></li>
+    <li><a href="#objectives">Objectives</a></li>
+    <li><a href="#joining">Joining a Run</a></li>
+    <li><a href="#meta">Meta-Progression</a></li>
+    <li><a href="#shop">Cosmetic Shop</a></li>
+    <li><a href="#minimap">Minimap &amp; Telegraphs</a></li>
+    <li><a href="#audio">Audio &amp; Settings</a></li>
+    <li><a href="#soon">Coming Soon</a></li>
+    <li><a href="#faq">FAQ &amp; Troubleshooting</a></li>
+  </ul>
+</nav>
+
+<main id="main">
+
+<section id="basics" aria-labelledby="h-basics">
+  <h2 class="sec" id="h-basics">The Basics</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p><strong>Dungeon of the Covenant</strong> is a real-time multiplayer action RPG played in your browser. No install, no launcher: open the link, pick a hero, and descend. Parties of 2 to 8 players fight through procedurally generated dungeon floors, complete objectives, and face multi-phase biome bosses.</p>
+  <ul>
+    <li><strong>Co-op first.</strong> Everything is built for parties. Empty slots are filled by AI companion bots so you can start immediately, and real players who join mid-match via Quick Play take over bot slots.</li>
+    <li><strong>Server-authoritative.</strong> Health, damage, loot, XP, and rewards are all computed on the server. There is no client-side cheating, and disconnects cannot corrupt your account.</li>
+    <li><strong>Every run is different.</strong> Dungeon layouts, prop placement, objectives, and enemy packs are seeded per run. The dungeon also <em>learns</em> (see Living Dungeon).</li>
+  </ul>
+</section>
+
+<section id="controls" aria-labelledby="h-controls">
+  <h2 class="sec" id="h-controls">Controls</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>Keyboard and mouse by default. Gamepads (Xbox, PlayStation, USB, Bluetooth) are also supported: left stick moves, right stick aims, triggers attack and dash.</p>
+  <table>
+    <thead><tr><th scope="col">Action</th><th scope="col">Keys</th></tr></thead>
+    <tbody>
+      <tr><td>Move</td><td><span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> or arrow keys</td></tr>
+      <tr><td>Aim</td><td>Mouse</td></tr>
+      <tr><td>Basic attack</td><td>Left mouse click, <span class="kbd">E</span> or <span class="kbd">K</span> (hold to keep swinging)</td></tr>
+      <tr><td>Ability 1 / 2 / 3</td><td><span class="kbd">1</span> <span class="kbd">2</span> <span class="kbd">3</span> (or <span class="kbd">R</span> for ability 3)</td></tr>
+      <tr><td>Dash (brief invulnerability)</td><td><span class="kbd">Shift</span></td></tr>
+      <tr><td>Jump</td><td><span class="kbd">Space</span> or <span class="kbd">J</span></td></tr>
+      <tr><td>Loot / interact</td><td><span class="kbd">F</span></td></tr>
+      <tr><td>Inventory</td><td><span class="kbd">I</span></td></tr>
+      <tr><td>Minimap toggle</td><td><span class="kbd">G</span></td></tr>
+      <tr><td>Audio mute</td><td><span class="kbd">M</span></td></tr>
+      <tr><td>Clean HUD (hide panels)</td><td><span class="kbd">H</span></td></tr>
+      <tr><td>Close panels / pause</td><td><span class="kbd">Esc</span></td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>Tip:</strong> dash through enemy attacks, not away from them. The invulnerability window lets you reposition inside a boss's blind spot.</div>
+</section>
+
+<section id="classes" aria-labelledby="h-classes">
+  <h2 class="sec" id="h-classes">Hero Classes</h2>
+  <p class="sec-sub">Six heroes available from the start. Three more are sealed in the Covenant Vault (see Meta-Progression).</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <div class="card-grid">
+    <div class="card"><h4>🛡️ Juggernaut</h4><div class="role">Tank</div>
+      <p>Armored titan that controls crowds and shatters frozen targets with devastating hammer impacts.</p>
+      <ul><li><strong>Shield Slam:</strong> stuns enemies ahead, shatters frozen foes for 250% damage</li>
+      <li><strong>Iron Bastion:</strong> taunts nearby enemies, shields allies with 40% damage resistance</li>
+      <li><strong>Seismic Vortex:</strong> drags the whole room into a tight cluster for ally AoE</li></ul></div>
+    <div class="card"><h4>✨ Radiant Cleric</h4><div class="role">Healer</div>
+      <p>Holy champion that purges the darkness and empowers teammate strikes with radiant explosions.</p>
+      <ul><li><strong>Luminary Lance:</strong> piercing light beam that damages enemies and heals allies in a line</li>
+      <li><strong>Sanctuary Ward:</strong> golden glyph that rapidly regenerates ally health</li>
+      <li><strong>Judgement Brand:</strong> branded targets erupt in radiant bursts whenever teammates hit them</li></ul></div>
+    <div class="card"><h4>🗡️ Shadowblade</h4><div class="role">Rogue</div>
+      <p>Lethal assassin that coats fields in flammable pitch and tears through vulnerable foes.</p>
+      <ul><li><strong>Shadowstep:</strong> teleports behind the target with a vicious bleeding strike</li>
+      <li><strong>Tar Bomb:</strong> flammable tar slick (60% slow), ignites into an inferno with fire</li>
+      <li><strong>Eviscerate:</strong> 300% bonus damage against burning or crowd-controlled targets</li></ul></div>
+    <div class="card"><h4>🔥 Pyromancer</h4><div class="role">Mage</div>
+      <p>Master of elemental reactions. Freezes enemies solid and detonates tar with explosive hellfire.</p>
+      <ul><li><strong>Frost Nova:</strong> freezes all nearby enemies solid for 3.5 seconds</li>
+      <li><strong>Fireball:</strong> explosive projectile, ignites Tar Bombs into an Infernal Conflagration</li>
+      <li><strong>Chaos Meteor:</strong> massive delayed orbital bombardment with extreme knockback</li></ul></div>
+    <div class="card"><h4>🏹 Deadeye</h4><div class="role">Ranger</div>
+      <p>Sharpshooter that unleashes arrow storms and conceals allies for clutch rescues.</p>
+      <ul><li><strong>Rapid Volley:</strong> fan of 7 piercing arrows, rapid radiant procs on branded targets</li>
+      <li><strong>Pinning Trap:</strong> roots enemies in place and shreds their armor</li>
+      <li><strong>Smoke Veil:</strong> smoke cloud granting stealth and 100% evasion for safe revives</li></ul></div>
+    <div class="card"><h4>💀 Dreadweaver</h4><div class="role">Necromancer</div>
+      <p>Dark sorcerer that harvests life essence and detonates fallen corpses into toxic clouds.</p>
+      <ul><li><strong>Bone Spikes:</strong> linear barrage of piercing bone spears that cause bleeding</li>
+      <li><strong>Soul Drain:</strong> channels health from the target, redistributing it to all allies</li>
+      <li><strong>Corpse Explosion:</strong> detonates fallen enemy corpses into massive toxic bursts</li></ul></div>
+  </div>
+  <h3>Vault-unlockable classes</h3>
+  <div class="card-grid">
+    <div class="card"><span class="badge">Vault unlock</span><h4>🧪 Plaguecaller</h4><div class="role">Alchemist</div>
+      <p>Bubbling cauldrons of ruin. Siphons life and melts armor with virulent rot. Draws blessings from the necromantic tree.</p></div>
+    <div class="card"><span class="badge">Vault unlock</span><h4>⚰️ Grave Warden</h4><div class="role">Sentinel</div>
+      <p>An unmoving tombstone with a heartbeat. Holds the line where others break. Draws blessings from the juggernaut tree.</p></div>
+    <div class="card"><span class="badge">Vault unlock</span><h4>🗡️ Hexblade</h4><div class="role">Dark Knight</div>
+      <p>A cursed blade that drinks from the shadows it cuts. Fast, cruel, precise. Draws blessings from the rogue tree.</p></div>
+  </div>
+  <div class="callout"><strong>Team synergy wins runs.</strong> Classic combos: Shadowblade lays Tar Bomb, Pyromancer ignites it. Cleric brands the boss, Deadeye's volley detonates the brand. Juggernaut clusters the room, Dreadweaver detonates the corpses.</div>
+</section>
+
+<section id="biomes" aria-labelledby="h-biomes">
+  <h2 class="sec" id="h-biomes">Biomes</h2>
+  <p class="sec-sub">Every descent draws from four themed dungeon languages, each with its own props, lighting, hazards, and boss.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <div class="card-grid">
+    <div class="card"><h4>🦴 The Sunken Crypt</h4><p>Bone vaults and cold blue mist. Skeletal enemies rise from the ossuaries: brittle but relentless, dealing cold damage.</p></div>
+    <div class="card"><h4>❄️ The Ember Cavern</h4><p>Rough rock and ember-orange underlight. Crystalline, shard-infused enemies strike fast across the ice with cold damage.</p></div>
+    <div class="card"><h4>🔥 The Soul-Forge</h4><p>Anvils, lava channels, and hanging chains. Ember-infused enemies hit 15% harder with fire damage. Home of the Cinder Thrall elite.</p></div>
+    <div class="card"><h4>👑 The Covenant Throne Room</h4><p>Grand pillars, war banners, and braziers. The seat of the Covenant Sovereign, where the deepest bargains are struck.</p></div>
+  </div>
+  <p>Deeper floors scale multiplicatively: by floor 5, packs hit roughly 1.9x health and 1.6x damage versus floor 1. Plan your oaths and gear accordingly.</p>
+</section>
+
+<section id="enemies" aria-labelledby="h-enemies">
+  <h2 class="sec" id="h-enemies">Enemies &amp; Bosses</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <h3>Enemy packs</h3>
+  <p>Melee bruisers, ranged harassers, and swarming packs, each reskinned and retuned per biome (Skeletal, Crystalline, Ember-Infused variants). Enemies run a real AI state machine: they patrol, chase, attack, and flee when outmatched.</p>
+  <h3>Elites</h3>
+  <p>Elites always carry at least one affix (two from floor 4 on), shown as a colored aura:</p>
+  <ul>
+    <li><strong>Swift</strong> — much faster movement and attacks</li>
+    <li><strong>Brutal</strong> — massively increased damage</li>
+    <li><strong>Vampiric</strong> — heals from the damage it deals</li>
+    <li><strong>Shielded</strong> — protected by an absorb shield</li>
+    <li><strong>Explosive</strong> — detonates on death, clear the blast zone</li>
+  </ul>
+  <h3>Named threats</h3>
+  <ul>
+    <li><strong>Vorgath, Bone-Executioner</strong> — West Wing warden, an elite executioner</li>
+    <li><strong>Arch-Lich Malthor</strong> — East Wing warden, an elite lich</li>
+    <li><strong>Cinder Thrall</strong> — Soul-Forge elite, a molten obsidian colossus (1100 HP) whose strikes set you burning</li>
+  </ul>
+  <h3>Biome bosses (3 phases each)</h3>
+  <table>
+    <thead><tr><th scope="col">Boss</th><th scope="col">Biome</th><th scope="col">Phases</th></tr></thead>
+    <tbody>
+      <tr><td>Veylith, the Ossuary Matriarch</td><td>Sunken Crypt</td><td>The Matriarch Wakes, Choir of Splinters, Ossuary Collapse</td></tr>
+      <tr><td>Glacius, Warden of the Rime</td><td>Ember Cavern</td><td>The Rime Stirs, Whiteout, Absolute Zero</td></tr>
+      <tr><td>Malakor, Soul-Forge Warden</td><td>Soul-Forge</td><td>The Warden Rises, Soul-Forge Ignition, Warden's Pyre</td></tr>
+      <tr><td>The Covenant Sovereign</td><td>Throne Room</td><td>The Rift Opens, Dimensional Echo, final reckoning</td></tr>
+    </tbody>
+  </table>
+  <div class="callout"><strong>Watch the ground.</strong> Signature boss attacks are telegraphed with red ground zones showing the exact wind-up time. When you see red, move.</div>
+</section>
+
+<section id="combat" aria-labelledby="h-combat">
+  <h2 class="sec" id="h-combat">Combat, XP &amp; Abilities</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>Combat is real-time and positional. Basic attacks chain into abilities, abilities chain into each other: frozen enemies shatter for bonus damage, tar ignites, corpses detonate, branded targets erupt. Experiment with cross-class combos.</p>
+  <ul>
+    <li><strong>XP and leveling:</strong> kills and objectives grant XP. Level up mid-run to grow stronger immediately.</li>
+    <li><strong>Ability upgrades:</strong> leveling offers ability choices and blessings that improve your three class abilities across the run.</li>
+    <li><strong>Downed, not dead:</strong> when you fall you enter a downed state with a revive timer. Allies can revive you (Deadeye's Smoke Veil makes this safe). If the timer expires, you respawn at the soul-seal.</li>
+    <li><strong>Damage numbers, kill feed, buffs:</strong> the HUD tracks your vitals, active buffs, recent kills, and floating damage numbers so you can read every fight.</li>
+  </ul>
+</section>
+
+<section id="loot" aria-labelledby="h-loot">
+  <h2 class="sec" id="h-loot">Loot &amp; Gear</h2>
+  <p class="sec-sub">Server-authoritative drops. What the server rolls is what you get, no exceptions.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>Enemies, elites, and bosses drop gear across three slots: <strong>weapon</strong>, <strong>armor</strong>, and <strong>relic</strong>. Press <span class="kbd">F</span> near a drop to pick it up, <span class="kbd">I</span> to open your 40-slot inventory, compare tooltips included.</p>
+  <h3>Rarities</h3>
+  <table>
+    <thead><tr><th scope="col">Rarity</th><th scope="col">Color</th><th scope="col">Power</th></tr></thead>
+    <tbody>
+      <tr><td class="r-common"><strong>Common</strong></td><td>Gray</td><td>Baseline</td></tr>
+      <tr><td class="r-uncommon"><strong>Uncommon</strong></td><td>Green</td><td>1.35x stat multiplier</td></tr>
+      <tr><td class="r-rare"><strong>Rare</strong></td><td>Blue</td><td>1.75x stat multiplier</td></tr>
+      <tr><td class="r-epic"><strong>Epic</strong></td><td>Purple</td><td>2.35x stat multiplier</td></tr>
+      <tr><td class="r-legendary"><strong>Legendary</strong></td><td>Orange</td><td>3.2x stat multiplier</td></tr>
+    </tbody>
+  </table>
+  <h3>Affixes</h3>
+  <p>Higher rarities roll stat affixes: bonus damage, max HP, critical chance, lifesteal, cooldown haste, armor, and elemental resistance. Elites and bosses drop from biome-weighted tables, so hunting specific biomes targets specific loot.</p>
+  <div class="callout"><strong>Legendary loot beams.</strong> High-rarity drops fire a visible beam into the sky. If you see orange light across the room, go get it.</div>
+</section>
+
+<section id="oaths" aria-labelledby="h-oaths">
+  <h2 class="sec" id="h-oaths">Covenant Oaths</h2>
+  <p class="sec-sub">The signature system. Kneel at a shrine mid-run and swear a binding oath to a dark power: real power, real price, and a behavioral term the dungeon enforces.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>Oath shrines (the Obelisk of the First Bargain and the Altar of the Second Price) appear in the dungeon. Each oath grants a <span class="benefit">run-long benefit</span>, inflicts a <span class="cost">run-long cost</span>, and binds you to a <span class="term">behavioral term</span>. Break the term and the oath curses you.</p>
+
+  <div class="oath"><h4>🩸 Oath of the Crimson Tithe</h4>
+    <p><span class="benefit">Benefit: +35% damage dealt, permanent this run.</span><br>
+    <span class="cost">Cost: max HP permanently reduced by 20% this run (never restored).</span><br>
+    <span class="term">Term: the Tithe must be fed. Deal damage at least once every 90 seconds while foes remain, or it collects from you.</span></p></div>
+
+  <div class="oath"><h4>🕯️ Oath of the Hollow Saint</h4>
+    <p><span class="benefit">Benefit: healing aura. You and nearby allies regenerate 3% max HP every 2 seconds.</span><br>
+    <span class="cost">Cost: you are HUNTED. Ambush packs spawn to kill you every 45 seconds.</span><br>
+    <span class="term">Term: the Saint demands vigilance. If an ally falls within 12m of you, the oath breaks.</span></p></div>
+
+  <div class="oath"><h4>🔥 Oath of Ruin</h4>
+    <p><span class="benefit">Benefit: your kills detonate for 90 fire damage in 4.5 meters.</span><br>
+    <span class="cost">Cost: friendly fire is ON for you. Your attacks wound allies for 50% of base damage.</span><br>
+    <span class="term">Term: Ruin must be fed. Land a killing blow at least once every 75 seconds while foes remain, or it feeds on you.</span></p></div>
+
+  <div class="oath"><h4>🪙 Oath of the Silent Coin</h4>
+    <p><span class="benefit">Benefit: DOUBLE gold and XP from your kills.</span><br>
+    <span class="cost">Cost: you cannot be healed by others. Their magic dies on your skin.</span><br>
+    <span class="term">Term: suffer an ally's healing touch twice and the Coin calls the debt.</span></p></div>
+
+  <div class="oath"><h4>⛓️ Oath of the Iron Vigil</h4>
+    <p><span class="benefit">Benefit: 30% less damage taken, plus 15 thorns that make melee attackers bleed.</span><br>
+    <span class="cost">Cost: 25% slower movement, forever this run.</span><br>
+    <span class="term">Term: the Vigil never retreats. Dashing while a foe stands within 6m breaks the oath.</span></p></div>
+
+  <div class="oath"><h4>⚱️ Oath of the Ashen Martyr</h4>
+    <p><span class="benefit">Benefit: +10% damage. When you fall, nearby allies gain +50% damage and +40% speed for 20 seconds.</span><br>
+    <span class="cost">Cost: your downed timer is halved (15 seconds to death).</span><br>
+    <span class="term">Term: a death alone is just a death. If you fall with no ally within 15m, the oath breaks.</span></p></div>
+
+  <div class="callout"><strong>Break the term and the oath curses you.</strong> A broken oath inflicts a timed curse (reduced damage, increased damage taken, or worse) for the rest of the encounter. The dark powers do not forgive.</div>
+  <div class="callout"><strong>Oaths are announced to the whole party.</strong> Everyone sees what you swore and what it costs. Coordinate: one player on Crimson Tithe plus a Cleric on Hollow Saint is a classic pairing.</div>
+</section>
+
+<section id="living" aria-labelledby="h-living">
+  <h2 class="sec" id="h-living">Living Dungeon &amp; Nemesis</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <h3>The dungeon learns</h3>
+  <p>The Living Dungeon watches how your party fights. If more than 70% of your damage comes from one strategy (all melee, all magic, all ranged), the dungeon adapts: resistances shift, counters spawn, and the run pushes back. One-trick parties get punished. Balanced parties thrive.</p>
+  <h3>Your nemesis remembers</h3>
+  <p>The Nemesis system tracks your run personally. An elite that survives you, or that you barely escape, can return later in the run: renamed, boosted, and hunting you specifically. Debts in the Covenant are personal.</p>
+</section>
+
+<section id="objectives" aria-labelledby="h-objectives">
+  <h2 class="sec" id="h-objectives">Objectives</h2>
+  <p class="sec-sub">Multiple autogenerated objectives per floor, tracked on the HUD.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <ul>
+    <li><strong>Slay the Wardens</strong> — kill the West and East Wing Wardens to shatter the floor's soul-seals</li>
+    <li><strong>Destroy Corrupted Shrines</strong> — smash the shrines feeding the dungeon's power</li>
+    <li><strong>Recover the Relic</strong> — find and claim the biome's covenant relic</li>
+    <li><strong>Survive the Ambush</strong> — hold out against a summoned horde</li>
+  </ul>
+  <p>Completing objectives grants XP and loot and advances the floor. The objective tracker shows live progress for the whole party.</p>
+</section>
+
+<section id="joining" aria-labelledby="h-joining">
+  <h2 class="sec" id="h-joining">Joining a Run</h2>
+  <p class="sec-sub">Four ways into the dungeon. They all coexist.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <ul>
+    <li><strong>Quick Play</strong> — hit PLAY NOW on the main menu and get matched into a party automatically. If the party has empty slots, AI companion bots fill them so the run starts instantly; real players who queue in take over bot slots.</li>
+    <li><strong>Private chamber</strong> — create a chamber on the Chamber tab and share its 4-letter code. Only people with the code can join.</li>
+    <li><strong>Invite links</strong> — every chamber has a copyable invite link. Anyone who opens it lands on the site with your chamber code pre-filled; they enter a hero name and hit Join.</li>
+    <li><strong>Lobby browser</strong> — browse open public games and join the one you like.</li>
+  </ul>
+  <p>Runs support 2 to 8 players. The pause menu notes it honestly: when you pause, the dungeon holds its breath but your allies fight on.</p>
+</section>
+
+<section id="meta" aria-labelledby="h-meta">
+  <h2 class="sec" id="h-meta">Meta-Progression</h2>
+  <p class="sec-sub">Progress that survives the run. Computed server-side, stored on your account.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>Every run earns account XP and <strong>seals</strong>, calculated by the server from your actual performance. No client-sent totals are ever trusted. Spend seals in the <strong>Covenant Vault</strong> and climb 8 covenant ranks:</p>
+  <ol>
+    <li>🕯️ Soul-Sworn Initiate</li>
+    <li>🩸 Blood Oathbearer <span class="ink-faint">(1,500 XP)</span></li>
+    <li>⚰️ Grave Vigil <span class="ink-faint">(4,000 XP)</span></li>
+    <li>📯 Dread Herald <span class="ink-faint">(8,000 XP)</span></li>
+    <li>🌑 Night Requiem <span class="ink-faint">(14,000 XP)</span></li>
+    <li>💀 Doombringer <span class="ink-faint">(22,000 XP)</span></li>
+    <li>🕳️ Harbinger of the Hollow <span class="ink-faint">(34,000 XP)</span></li>
+    <li>👑 Malakor's Chosen <span class="ink-faint">(50,000 XP)</span></li>
+  </ol>
+  <h3>Covenant Vault unlocks</h3>
+  <ul>
+    <li><strong>Classes:</strong> 🧪 Plaguecaller (800 seals, rank 1), ⚰️ Grave Warden (1,400 seals, rank 2), 🗡️ Hexblade (2,200 seals, rank 3)</li>
+    <li><strong>Boons:</strong> permanent starting blessings for every run, including Veteran's Grit, Soul Well, Swift Covenant, and Executioner's Edge</li>
+    <li><strong>Stash tabs:</strong> expand your permanent storage</li>
+  </ul>
+</section>
+
+<section id="shop" aria-labelledby="h-shop">
+  <h2 class="sec" id="h-shop">Cosmetic Shop</h2>
+  <p class="sec-sub">COSMETICS ONLY. Never pay-to-win.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>The Covenant Emporium sells appearance-only cosmetics purchased through Stripe. Nothing in the shop affects damage, health, or any gameplay stat, and the shop says so on every screen. The catalog:</p>
+  <ul>
+    <li><strong>Hero skins:</strong> Obsidian Plate, Sunforged Regalia, Voidborn Shroud</li>
+    <li><strong>Weapon glows:</strong> Hellfire Edge, Astral Edge, Necrotic Edge</li>
+    <li><strong>Emotes:</strong> Victory Flourish, War Taunt, Shadow Dance</li>
+    <li><strong>Covenant Collector's Bundle:</strong> every cosmetic in the shop, one price</li>
+  </ul>
+  <p>Purchases are verified server-side with signed Stripe sessions and webhooks before anything is granted. Receipts are idempotent: you can never be charged twice for the same item.</p>
+</section>
+
+<section id="minimap" aria-labelledby="h-minimap">
+  <h2 class="sec" id="h-minimap">Minimap &amp; Boss Telegraphs</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>Press <span class="kbd">G</span> to toggle the minimap. It uses real fog of war with shared party vision: explored areas stay mapped, and you see what your party sees right now. Enemies, objectives, and boss arenas are marked with shape-coded icons (not color alone, so they stay readable for colorblind players).</p>
+  <p>Boss signature attacks broadcast <strong>ground telegraphs</strong>: red zones with exact wind-up timing before the hit lands. Learn each boss's tells and the telegraphs become a dance.</p>
+</section>
+
+<section id="audio" aria-labelledby="h-audio">
+  <h2 class="sec" id="h-audio">Audio &amp; Settings</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <p>All audio is synthesized live with the Web Audio API. No audio files, no downloads.</p>
+  <ul>
+    <li><strong>Per-biome ambient beds:</strong> each of the four biomes has its own dark-ambient soundscape (instrumental only, never vocals)</li>
+    <li><strong>22 combat sound recipes:</strong> swings, hits, blocks, spell casts, deaths, pickups, level-ups, and boss stingers, with positional volume</li>
+    <li><strong>Controls:</strong> <span class="kbd">M</span> mutes instantly; the Settings panel (CODEX tab, or pause menu) has separate music and SFX sliders</li>
+  </ul>
+  <p>The Settings panel also covers graphics quality (bloom and particle effects auto-degrade if your frame rate drops), the <em>prefers-reduced-motion</em> system setting is respected for screen shake, and every control is keyboard reachable.</p>
+</section>
+
+<section id="soon" aria-labelledby="h-soon">
+  <h2 class="sec" id="h-soon">Coming Soon</h2>
+  <p class="sec-sub">In active development. Details will be documented here when they ship.</p>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <ul>
+    <li><strong>Seasons and battle pass</strong> — seasonal tracks, a daily seeded dungeon, weekly leaderboards</li>
+    <li><strong>Covens</strong> — guilds with shared progression and coven-vs-coven dungeon races</li>
+    <li><strong>Clip button</strong> — one-tap 30-second gameplay capture for sharing</li>
+    <li><strong>Endless rift mode</strong> — scaling-difficulty endgame dungeons</li>
+    <li><strong>Mobile touch controls</strong> — virtual joystick and ability buttons for touch devices</li>
+  </ul>
+</section>
+
+<section id="faq" aria-labelledby="h-faq">
+  <h2 class="sec" id="h-faq">FAQ &amp; Troubleshooting</h2>
+  <div class="orn" aria-hidden="true"><span>◆</span></div>
+  <h3>What do I need to play?</h3>
+  <p>A modern desktop browser (Chrome, Edge, Firefox, or Safari) with WebGL and WebSockets enabled. No install. Mobile touch controls are coming soon; for now a keyboard and mouse (or gamepad) is required.</p>
+  <h3>Why does the first join take a few seconds sometimes?</h3>
+  <p>The game server sleeps when nobody is playing to keep costs down, and wakes on the first join. That cold start takes a few seconds, then everything is instant while players are active.</p>
+  <h3>I hear no audio. Is something broken?</h3>
+  <p>Probably not. Browsers block audio before your first click or keypress. Click anywhere on the page once and the soundscape starts. Check the <span class="kbd">M</span> key and the music/SFX sliders in Settings if it stays silent.</p>
+  <h3>The game stutters on my machine.</h3>
+  <p>Open Settings and lower the graphics quality. Bloom, particles, and shadow detail scale down automatically when the frame rate drops, but the manual quality setting gives you direct control.</p>
+  <h3>Can I play solo?</h3>
+  <p>Yes. Queue into Quick Play and AI companion bots fill your party. Real players who join take over bot slots, so a solo run can organically become a full party.</p>
+  <h3>Is the shop pay-to-win?</h3>
+  <p>No. The shop sells cosmetics only: skins, weapon glows, emotes. Nothing purchasable changes stats, damage, or progression speed.</p>
+  <h3>I found a bug. What should I do?</h3>
+  <p>Note what you were doing, which biome and floor, and what you expected. Report it through the game's community channels with those details.</p>
+</section>
+
+</main>
+
+<footer>
+  <p>DUNGEON OF THE COVENANT — Official Game Guide. The dungeon remembers.</p>
+  <p><a href="/">Back to the game</a></p>
+</footer>
+
+</body>
+</html>
