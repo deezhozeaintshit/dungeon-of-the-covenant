@@ -12,6 +12,13 @@ export class SettingsPanel {
     const panel = document.createElement('div');
     panel.id = 'settings-panel';
     panel.className = 'settings-panel hidden';
+    // Audio tab reads live values from the AudioManager (persisted across sessions).
+    const _aud = this.game.audio;
+    const _pct = (v, d) => (_aud && typeof v === 'number') ? Math.round(v * 100) : d;
+    const _masterPct = _pct(_aud?.volume, 82);
+    const _musicPct = _pct(_aud?.musicVolume, 58);
+    const _sfxPct = _pct(_aud?.sfxVolume, 80);
+    const _mutedAttr = _aud?.muted ? 'checked' : '';
     panel.innerHTML = `
       <div class="settings-overlay"></div>
       <div class="settings-content">
@@ -45,18 +52,23 @@ export class SettingsPanel {
           <!-- Audio Settings -->
           <div class="settings-tab" id="tab-audio">
             <div class="setting-row">
-              <label>Master Volume</label>
-              <input type="range" id="setting-master-volume" min="0" max="100" value="${this.game.audio?.volume * 100 || 70}">
-              <span id="master-volume-value">70%</span>
+              <label for="setting-master-volume">Master Volume</label>
+              <input type="range" id="setting-master-volume" min="0" max="100" value="${_masterPct}" aria-describedby="master-volume-value">
+              <span id="master-volume-value" aria-live="polite">${_masterPct}%</span>
             </div>
             <div class="setting-row">
-              <label>SFX Volume</label>
-              <input type="range" id="setting-sfx-volume" min="0" max="100" value="80">
-              <span id="sfx-volume-value">80%</span>
+              <label for="setting-music-volume">Music Volume</label>
+              <input type="range" id="setting-music-volume" min="0" max="100" value="${_musicPct}" aria-describedby="music-volume-value">
+              <span id="music-volume-value" aria-live="polite">${_musicPct}%</span>
             </div>
             <div class="setting-row">
-              <label>Mute All Audio</label>
-              <input type="checkbox" id="setting-mute">
+              <label for="setting-sfx-volume">SFX Volume</label>
+              <input type="range" id="setting-sfx-volume" min="0" max="100" value="${_sfxPct}" aria-describedby="sfx-volume-value">
+              <span id="sfx-volume-value" aria-live="polite">${_sfxPct}%</span>
+            </div>
+            <div class="setting-row">
+              <label for="setting-mute">Mute All Audio</label>
+              <input type="checkbox" id="setting-mute" ${_mutedAttr}>
             </div>
           </div>
           <!-- Video Settings -->
@@ -201,9 +213,20 @@ export class SettingsPanel {
       }
     });
 
+    document.getElementById('setting-music-volume')?.addEventListener('input', (e) => {
+      const value = e.target.value;
+      document.getElementById('music-volume-value').textContent = value + '%';
+      if (this.game.audio) {
+        this.game.audio.setMusicVolume(value / 100);
+      }
+    });
+
     document.getElementById('setting-sfx-volume')?.addEventListener('input', (e) => {
       const value = e.target.value;
       document.getElementById('sfx-volume-value').textContent = value + '%';
+      if (this.game.audio) {
+        this.game.audio.setSfxVolume(value / 100);
+      }
     });
 
     // Mute toggle

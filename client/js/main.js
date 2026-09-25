@@ -1149,6 +1149,7 @@ class GameApp {
         this.narrator.say(`${msg.bossName} AWAKENS!`, 'danger');
         this.audio.setMusicMode('boss');
         this.audio.playSFX('explosion');
+        this.audio.playBossStinger();
         const bossBar = document.getElementById('boss-hud-bar');
         if (bossBar) bossBar.classList.remove('hidden');
       },
@@ -1201,6 +1202,7 @@ class GameApp {
           }
           this.renderer.triggerScreenShake(0.6);
           this.audio.setMusicMode('dungeon');
+          if (cfg.biome && cfg.biome.id) this.audio.setBiome(cfg.biome.id);
           this.audio.playSFX('war_horn');
         }
       },
@@ -1382,6 +1384,9 @@ class GameApp {
       if (this.dungeon && typeof this.dungeon.applyProceduralFloorConfig === 'function') {
         this.dungeon.applyProceduralFloorConfig(snap.proceduralConfig);
       }
+      // Phase 3 audio: match the ambient bed to the floor's biome.
+      const floorBiome = snap.proceduralConfig.biome;
+      if (floorBiome && floorBiome.id && this.audio) this.audio.setBiome(floorBiome.id);
     }
 
     // 1. Sync Players

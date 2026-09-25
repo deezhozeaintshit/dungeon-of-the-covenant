@@ -1,5 +1,8 @@
 // AudioManager.js - Studio-Grade Web Audio Orchestral Soundtrack & Physical-Modeling Object SFX Engine
 // Every weapon, spell, material, loot item, creature, and environment has a custom physical-modeling sound recipe.
+// Phase 3 (Audio Engine): per-biome dark-ambient beds (crypt / cavern / forge / throne_room, instrumental only,
+// never vocals), distance-attenuated positional SFX, master/music/SFX volume buses, mute toggle, settings
+// persistence, visibility-change auto-suspend, and a boss stinger. Zero audio assets - everything is synthesized.
 
 export class AudioManager {
   constructor() {
@@ -10,19 +13,56 @@ export class AudioManager {
     this.reverbNode = null;
     this.initialized = false;
     this.muted = false;
-    this.volume = 0.82;
+    this.volume = 0.82;      // master
+    this.sfxVolume = 0.80;   // sfx bus
+    this.musicVolume = 0.58; // music bus
+    this.noiseBuffer = null;
+
+    // Per-call SFX bus (used for distance attenuation); falls back to sfxGain.
+    this._bus = null;
 
     // Orchestral Sequencer State
     this.musicPlaying = false;
     this.musicTimer = null;
     this.musicStep = 0;
     this.musicMode = 'lobby'; // 'lobby', 'dungeon', 'boss'
-    this.droneOscs = [];
+    this.biome = 'crypt';     // 'crypt', 'cavern', 'forge', 'throne_room'
+    this.ambientNodes = [];
+    this._suspendedForHidden = false;
 
+    this._loadSettings();
     this.setupAutoUnlock();
   }
 
+  // ------------------------------------------------------------------
+  // Settings persistence (localStorage, best-effort)
+  // ------------------------------------------------------------------
+  _loadSettings() {
+    try {
+      const raw = localStorage.getItem('dotc_audio');
+      if (!raw) return;
+      const s = JSON.parse(raw);
+      if (typeof s.volume === 'number') this.volume = Math.max(0, Math.min(1, s.volume));
+      if (typeof s.sfxVolume === 'number') this.sfxVolume = Math.max(0, Math.min(1, s.sfxVolume));
+      if (typeof s.musicVolume === 'number') this.musicVolume = Math.max(0, Math.min(1, s.musicVolume));
+      if (typeof s.muted === 'boolean') this.muted = s.muted;
+    } catch (_) { /* storage unavailable - keep defaults */ }
+  }
+
+  _saveSettings() {
+    try {
+      localStorage.setItem('dotc_audio', JSON.stringify({
+        volume: this.volume,
+        sfxVolume: this.sfxVolume,
+        musicVolume: this.musicVolume,
+        muted: this.muted
+      }));
+    } catch (_) { /* storage unavailable - ignore */ }
+  }
+
   setupAutoUnlock() {
+    // MUST NOT autoplay-block: the AudioContext is created lazily on the first
+    // real user gesture, then the ambient bed starts.
     const unlock = () => {
       this.init();
       this.resume();
@@ -34,6 +74,24 @@ export class AudioManager {
     window.addEventListener('keydown', unlock, { passive: true });
     window.addEventListener('touchstart', unlock, { passive: true });
     window.addEventListener('gamepadconnected', unlock, { passive: true });
+
+    // Auto-degrade: suspend audio processing cleanly when the tab is hidden,
+    // resume when the player comes back (unless muted).
+    this._visibilityHandler = () => this.handleVisibilityChange();
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+  }
+
+  handleVisibilityChange() {
+    if (!this.ctx) return;
+    if (document.hidden) {
+      if (this.ctx.state === 'running') {
+        this._suspendedForHidden = true;
+        this.ctx.suspend().catch(() => {});
+      }
+    } else if (this._suspendedForHidden && !this.muted) {
+      this._suspendedForHidden = false;
+      this.resume();
+    }
   }
 
   init() {
@@ -63,16 +121,16 @@ export class AudioManager {
       reverbReturn.connect(this.masterGain);
 
       this.sfxGain = this.ctx.createGain();
-      this.sfxGain.gain.value = 0.92;
+      this.sfxGain.gain.value = this.sfxVolume;
       this.sfxGain.connect(this.masterGain);
       this.sfxGain.connect(this.reverbNode);
 
       this.musicGain = this.ctx.createGain();
-      this.musicGain.gain.value = 0.58;
+      this.musicGain.gain.value = this.musicVolume;
       this.musicGain.connect(this.masterGain);
       this.musicGain.connect(this.reverbNode);
 
-      // Pre-generate white/pink noise buffer for physical-modeling percussion, fire, wind & metal
+      // Pre-generate white noise buffer for physical-modeling percussion, fire, wind & metal
       this.noiseBuffer = this.createNoiseBuffer(2.5);
 
       this.initialized = true;
@@ -114,11 +172,22 @@ export class AudioManager {
     }
   }
 
+  // ------------------------------------------------------------------
+  // Volume / mute API (wired to the settings panel + HUD audio toggle)
+  // ------------------------------------------------------------------
   setMuted(muted) {
-    this.muted = muted;
+    this.muted = !!muted;
     if (this.masterGain && this.ctx) {
-      this.masterGain.gain.setTargetAtTime(muted ? 0 : this.volume, this.ctx.currentTime, 0.05);
+      this.masterGain.gain.setTargetAtTime(this.muted ? 0 : this.volume, this.ctx.currentTime, 0.05);
     }
+    this._saveSettings();
+  }
+
+  // Returns the new enabled state (true = audio on). Used by the HUD audio toggle.
+  toggle() {
+    this.init();
+    this.setMuted(!this.muted);
+    return !this.muted;
   }
 
   setVolume(vol) {
@@ -126,14 +195,144 @@ export class AudioManager {
     if (this.masterGain && !this.muted && this.ctx) {
       this.masterGain.gain.setTargetAtTime(this.volume, this.ctx.currentTime, 0.05);
     }
+    this._saveSettings();
+  }
+
+  setSfxVolume(vol) {
+    this.sfxVolume = Math.max(0, Math.min(1, vol));
+    if (this.sfxGain && this.ctx) {
+      this.sfxGain.gain.setTargetAtTime(this.sfxVolume, this.ctx.currentTime, 0.05);
+    }
+    this._saveSettings();
+  }
+
+  setMusicVolume(vol) {
+    this.musicVolume = Math.max(0, Math.min(1, vol));
+    if (this.musicGain && this.ctx) {
+      this.musicGain.gain.setTargetAtTime(this.musicVolume, this.ctx.currentTime, 0.05);
+    }
+    this._saveSettings();
   }
 
   setMusicMode(mode) {
     this.musicMode = mode || 'dungeon';
   }
 
+  // ------------------------------------------------------------------
+  // Per-biome ambient beds. Accepts canonical ids (crypt/cavern/forge/throne_room)
+  // or legacy server biome ids (mapped like client/js/biomes.js LEGACY_BIOME_MAP).
+  // ------------------------------------------------------------------
+  _normalizeBiome(id) {
+    const legacy = {
+      ossuary_crypt: 'crypt',
+      glacial_sanctum: 'cavern',
+      blood_citadel: 'forge',
+      void_nexus: 'throne_room',
+      blight_catacombs: 'cavern'
+    };
+    const key = String(id || 'crypt').toLowerCase();
+    if (this._biomePalettes[key]) return key;
+    return legacy[key] || 'crypt';
+  }
+
+  setBiome(id) {
+    const norm = this._normalizeBiome(id);
+    if (norm === this.biome) return;
+    this.biome = norm;
+    // Hot-swap the ambient bed under the running sequencer (boss keeps its intensity).
+    if (this.musicPlaying && this.musicMode !== 'boss' && this.ctx) {
+      this._stopAmbientBed();
+      this._startAmbientBed();
+    }
+  }
+
+  // Dark-ambient palette per biome. All instrumental - no vocals, ever.
+  _biomePalettes = {
+    crypt: {
+      drone: [36.71, 55.00, 73.42], droneGains: [0.14, 0.06, 0.06], droneTypes: ['sine', 'sawtooth', 'sawtooth'],
+      bed: 'choir',
+      bass: [73.42,73.42,73.42,73.42, 73.42,73.42,87.31,82.41,
+             58.27,58.27,58.27,58.27, 65.41,65.41,73.42,73.42,
+             49.00,49.00,49.00,49.00, 58.27,58.27,55.00,55.00,
+             55.00,55.00,69.30,69.30, 73.42,73.42,55.00,73.42],
+      chords: {
+        0:  [146.83, 174.61, 220.00, 293.66],
+        8:  [116.54, 174.61, 233.08, 293.66],
+        16: [98.00, 146.83, 196.00, 233.08],
+        24: [110.00, 164.81, 220.00, 277.18]
+      },
+      melody: [293.66,0,349.23,440.00, 466.16,440.00,349.23,293.66,
+               233.08,293.66,349.23,0, 392.00,349.23,293.66,261.63,
+               196.00,233.08,293.66,392.00, 349.23,293.66,233.08,220.00,
+               220.00,277.18,329.63,440.00, 554.37,440.00,293.66,0],
+      drumEvery: 4, tomEvery: 4, taikoGain: 0.24, bassGain: 0.16, bassDur: 0.38,
+      padGain: 0.065, arpGain: 0.11, extras: null
+    },
+    cavern: {
+      drone: [32.70, 49.00, 65.41], droneGains: [0.15, 0.05, 0.05], droneTypes: ['sine', 'sine', 'triangle'],
+      bed: 'wind',
+      bass: [65.41,65.41,65.41,65.41, 65.41,65.41,77.78,73.42,
+             51.91,51.91,51.91,51.91, 58.27,58.27,65.41,65.41,
+             43.65,43.65,43.65,43.65, 51.91,51.91,49.00,49.00,
+             49.00,49.00,58.27,58.27, 65.41,65.41,49.00,65.41],
+      chords: {
+        0:  [130.81, 155.56, 196.00, 261.63],
+        8:  [103.83, 155.56, 207.65, 261.63],
+        16: [87.31, 130.81, 174.61, 207.65],
+        24: [98.00, 146.83, 196.00, 246.94]
+      },
+      melody: [261.63,0,311.13,392.00, 415.30,392.00,311.13,261.63,
+               246.94,261.63,311.13,0, 349.23,311.13,261.63,277.18,
+               196.00,207.65,261.63,349.23, 311.13,261.63,246.94,196.00,
+               196.00,246.94,293.66,392.00, 493.88,392.00,261.63,0],
+      drumEvery: 8, tomEvery: null, taikoGain: 0.20, bassGain: 0.13, bassDur: 0.44,
+      padGain: 0.05, arpGain: 0.08, extras: 'droplets'
+    },
+    forge: {
+      drone: [41.20, 61.74, 82.41], droneGains: [0.13, 0.07, 0.06], droneTypes: ['sine', 'sawtooth', 'square'],
+      bed: 'furnace',
+      bass: [82.41,82.41,82.41,82.41, 82.41,82.41,98.00,87.31,
+             65.41,65.41,65.41,65.41, 73.42,73.42,82.41,82.41,
+             55.00,55.00,55.00,55.00, 65.41,65.41,61.74,61.74,
+             61.74,61.74,65.41,73.42, 82.41,82.41,61.74,82.41],
+      chords: {
+        0:  [164.81, 207.65, 246.94, 329.63],
+        8:  [130.81, 164.81, 196.00, 261.63],
+        16: [174.61, 220.00, 261.63, 349.23],
+        24: [123.47, 155.56, 185.00, 220.00]
+      },
+      melody: [329.63,0,415.30,493.88, 523.25,493.88,415.30,329.63,
+               293.66,329.63,415.30,0, 440.00,415.30,329.63,311.13,
+               246.94,293.66,329.63,440.00, 415.30,329.63,293.66,246.94,
+               246.94,311.13,369.99,493.88, 659.26,493.88,329.63,0],
+      drumEvery: 4, tomEvery: 4, taikoGain: 0.27, bassGain: 0.17, bassDur: 0.30,
+      padGain: 0.055, arpGain: 0.10, extras: 'anvil'
+    },
+    throne_room: {
+      drone: [36.71, 55.00, 73.42, 110.00], droneGains: [0.13, 0.06, 0.06, 0.04],
+      droneTypes: ['sine', 'sawtooth', 'sawtooth', 'triangle'],
+      bed: 'brass',
+      bass: [73.42,73.42,73.42,73.42, 73.42,73.42,87.31,82.41,
+             58.27,58.27,58.27,58.27, 65.41,65.41,69.30,73.42,
+             49.00,49.00,49.00,49.00, 58.27,58.27,55.00,55.00,
+             55.00,55.00,65.41,69.30, 73.42,73.42,65.41,73.42],
+      chords: {
+        0:  [146.83, 174.61, 220.00, 293.66],
+        8:  [98.00, 146.83, 196.00, 233.08],
+        16: [116.54, 146.83, 174.61, 233.08],
+        24: [110.00, 138.59, 164.81, 220.00]
+      },
+      melody: [293.66,0,349.23,440.00, 523.25,440.00,349.23,293.66,
+               261.63,293.66,349.23,0, 392.00,349.23,293.66,329.63,
+               220.00,261.63,293.66,392.00, 349.23,293.66,261.63,220.00,
+               220.00,277.18,349.23,440.00, 587.33,440.00,293.66,0],
+      drumEvery: 8, tomEvery: 4, taikoGain: 0.28, bassGain: 0.17, bassDur: 0.42,
+      padGain: 0.075, arpGain: 0.10, extras: null
+    }
+  };
+
   // ============================================================================
-  // 1. CONTINUOUS DARK-FANTASY ORCHESTRAL SOUNDTRACK ENGINE
+  // 1. CONTINUOUS DARK-FANTASY AMBIENT SOUNDTRACK ENGINE
   // ============================================================================
   startAmbient() {
     this.init();
@@ -144,10 +343,9 @@ export class AudioManager {
     this.musicPlaying = true;
     this.musicStep = 0;
 
-    // Continuous Deep Cathedral Drone Pad (D1 + A1 Fifth)
-    this.startCathedralDrone();
+    this._startAmbientBed();
 
-    // 16-Step Polyphonic Sequencer (130 BPM sixteenth/eighth groove -> 220ms per step)
+    // 32-Step Polyphonic Sequencer (~130 BPM feel -> 230ms per step)
     const stepMs = 230;
     this.musicTimer = setInterval(() => {
       if (this.muted || !this.ctx || this.ctx.state !== 'running') return;
@@ -156,94 +354,138 @@ export class AudioManager {
     }, stepMs);
   }
 
-  startCathedralDrone() {
-    this.stopCathedralDrone();
+  _startAmbientBed() {
     if (!this.ctx) return;
+    this._stopAmbientBed();
+    const pal = this._biomePalettes[this.biome] || this._biomePalettes.crypt;
 
-    const freqs = [36.71, 55.0, 73.42]; // D1, A1, D2 Dark Cathedral Organ Pedal
-    freqs.forEach((f, idx) => {
+    // Continuous biome drone (organ pedal stack)
+    pal.drone.forEach((f, idx) => {
       const osc = this.ctx.createOscillator();
       const filter = this.ctx.createBiquadFilter();
       const gain = this.ctx.createGain();
 
-      osc.type = idx === 0 ? 'sine' : 'sawtooth';
+      osc.type = pal.droneTypes[idx] || 'sawtooth';
       osc.frequency.value = f;
       osc.detune.value = (idx - 1) * 6;
 
       filter.type = 'lowpass';
       filter.frequency.value = 180;
 
-      gain.gain.value = idx === 0 ? 0.14 : 0.06;
+      gain.gain.value = pal.droneGains[idx] || 0.05;
 
       osc.connect(filter);
       filter.connect(gain);
       gain.connect(this.musicGain);
       osc.start();
-      this.droneOscs.push({ osc, gain });
+      this.ambientNodes.push({ stop: () => { try { osc.stop(); } catch (_) {} }, nodes: [osc, filter, gain] });
     });
+
+    // Continuous biome noise bed (cavern wind / forge furnace roar / throne brass air)
+    if (pal.bed === 'wind' || pal.bed === 'furnace') {
+      const src = this.ctx.createBufferSource();
+      src.buffer = this.noiseBuffer;
+      src.loop = true;
+      const filter = this.ctx.createBiquadFilter();
+      const gain = this.ctx.createGain();
+      const lfo = this.ctx.createOscillator();
+      const lfoGain = this.ctx.createGain();
+      if (pal.bed === 'wind') {
+        filter.type = 'bandpass'; filter.frequency.value = 420; filter.Q.value = 0.7;
+        gain.gain.value = 0.035;
+        lfo.frequency.value = 0.07; lfoGain.gain.value = 0.02;
+      } else {
+        filter.type = 'lowpass'; filter.frequency.value = 130; filter.Q.value = 0.5;
+        gain.gain.value = 0.085;
+        lfo.frequency.value = 0.11; lfoGain.gain.value = 0.03;
+      }
+      lfo.type = 'sine';
+      lfo.connect(lfoGain); lfoGain.connect(gain.gain);
+      src.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
+      src.start(); lfo.start();
+      this.ambientNodes.push({ stop: () => { try { src.stop(); lfo.stop(); } catch (_) {} }, nodes: [src, filter, gain, lfo, lfoGain] });
+    } else if (pal.bed === 'brass') {
+      // Low sustained brass fifth under the throne room
+      [73.42, 110.00, 146.83].forEach((f) => {
+        const osc = this.ctx.createOscillator();
+        const filter = this.ctx.createBiquadFilter();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth'; osc.frequency.value = f;
+        filter.type = 'lowpass'; filter.frequency.value = 520;
+        gain.gain.value = 0.035;
+        osc.connect(filter); filter.connect(gain); gain.connect(this.musicGain);
+        osc.start();
+        this.ambientNodes.push({ stop: () => { try { osc.stop(); } catch (_) {} }, nodes: [osc, filter, gain] });
+      });
+    }
   }
 
-  stopCathedralDrone() {
-    this.droneOscs.forEach(d => {
-      try { d.osc.stop(); d.osc.disconnect(); } catch (_) {}
+  _stopAmbientBed() {
+    this.ambientNodes.forEach(entry => {
+      try { entry.stop(); } catch (_) {}
+      (entry.nodes || []).forEach(n => { try { n.disconnect(); } catch (_) {} });
     });
-    this.droneOscs = [];
+    this.ambientNodes = [];
   }
 
   tickMusicSequencer(step) {
     const now = this.ctx.currentTime;
     const isBoss = this.musicMode === 'boss';
-
-    // D Phrygian / Harmonic Minor Dark Fantasy Scale (Hz)
-    // D3=146.83, Eb3=155.56, F3=174.61, G3=196.00, A3=220.00, Bb3=233.08, C#4=277.18, D4=293.66
-    const bassProgression = [
-      73.42, 73.42, 73.42, 73.42,  73.42, 73.42, 87.31, 82.41, // D2 -> F2 -> E2
-      58.27, 58.27, 58.27, 58.27,  65.41, 65.41, 73.42, 73.42, // Bb1 -> C2 -> D2
-      49.00, 49.00, 49.00, 49.00,  58.27, 58.27, 55.00, 55.00, // G1 -> Bb1 -> A1
-      55.00, 55.00, 69.30, 69.30,  73.42, 73.42, 55.00, 73.42  // A1 -> C#2 -> D2
-    ];
+    const pal = this._biomePalettes[this.biome] || this._biomePalettes.crypt;
+    const s = step % 32;
+    const intensity = isBoss ? 1.25 : 1.0;
 
     // 1. Cello / Contrabass Driving Ostinato
-    if (step % 2 === 0 || isBoss) {
-      const bassFreq = bassProgression[step % 32];
-      this.playCelloNote(bassFreq, now, isBoss ? 0.20 : 0.38, isBoss ? 0.22 : 0.16);
+    if (s % 2 === 0 || isBoss) {
+      this.playCelloNote(pal.bass[s], now, isBoss ? 0.20 : pal.bassDur, (isBoss ? 0.22 : pal.bassGain) * intensity);
     }
 
-    // 2. Gothic Pipe Organ & Choir Pad Chords (Every 8 steps)
-    if (step % 8 === 0) {
-      const chordMap = {
-        0:  [146.83, 174.61, 220.00, 293.66], // D Minor
-        8:  [116.54, 174.61, 233.08, 293.66], // Bb Major 7
-        16: [98.00,  146.83, 196.00, 233.08], // G Minor
-        24: [110.00, 164.81, 220.00, 277.18]  // A7 Dominant (Gothic tension)
-      };
-      const chord = chordMap[step] || chordMap[0];
-      chord.forEach(freq => this.playChoirPadNote(freq, now, 1.75, 0.065));
+    // 2. Gothic Pipe Organ & Choir Pad Chords (every 8 steps)
+    if (s % 8 === 0) {
+      const chord = pal.chords[s] || pal.chords[0];
+      chord.forEach(freq => this.playChoirPadNote(freq, now, 1.75, pal.padGain * intensity));
     }
 
     // 3. Celestial Lute / Harp Arpeggio Melody
-    const melodyNotes = [
-      293.66, 0, 349.23, 440.00,  466.16, 440.00, 349.23, 293.66,
-      233.08, 293.66, 349.23, 0,  392.00, 349.23, 293.66, 261.63,
-      196.00, 233.08, 293.66, 392.00, 349.23, 293.66, 233.08, 220.00,
-      220.00, 277.18, 329.63, 440.00, 554.37, 440.00, 293.66, 0
-    ];
-    const melFreq = melodyNotes[step % 32];
+    const melFreq = pal.melody[s];
     if (melFreq > 0) {
-      this.playPluckedHarpNote(melFreq, now, 0.55, 0.11);
+      this.playPluckedHarpNote(melFreq, now, 0.55, pal.arpGain * intensity);
     }
 
     // 4. Cinematic War-Drums & Taiko Percussion
-    if (step % 4 === 0) {
-      // Deep Taiko Boom on downbeats
-      this.playTaikoDrum(now, 0.24);
-    } else if (step % 4 === 2 && (this.musicMode === 'dungeon' || isBoss)) {
-      // Mid Tom / War Rim
+    if (s % pal.drumEvery === 0) {
+      this.playTaikoDrum(now, pal.taikoGain * (isBoss ? 1.2 : 1));
+    } else if (pal.tomEvery && s % pal.tomEvery === pal.tomEvery / 2 && (this.musicMode === 'dungeon' || isBoss)) {
       this.playWarTom(now, 115, 0.14);
-    } else if (isBoss && step % 2 === 1) {
-      // Fast double-kick percussion during Boss Phase
+    }
+    if (isBoss && s % 2 === 1) {
       this.playWarTom(now, 90, 0.12);
     }
+
+    // 5. Biome signature extras (cavern drips / forge anvil ticks)
+    if (pal.extras === 'droplets' && (s === 6 || s === 22)) {
+      this.playMusicPartial(2500 + Math.random() * 900, 0.55, 0.04);
+    } else if (pal.extras === 'anvil' && s % 2 === 1) {
+      this.playMusicPartial(1568, 0.10, 0.045);
+      this.playMusicPartial(2093, 0.08, 0.028);
+    }
+  }
+
+  // Music-bus one-shot partial (for sequencer extras)
+  playMusicPartial(freq, duration, peakGain) {
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(20, freq * 0.94), now + duration);
+    gain.gain.setValueAtTime(0.001, now);
+    gain.gain.linearRampToValueAtTime(peakGain, now + 0.008);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+    osc.connect(gain);
+    gain.connect(this.musicGain);
+    osc.start(now);
+    osc.stop(now + duration + 0.02);
   }
 
   playCelloNote(freq, time, dur, gainVal) {
@@ -371,16 +613,50 @@ export class AudioManager {
       clearInterval(this.musicTimer);
       this.musicTimer = null;
     }
-    this.stopCathedralDrone();
+    this._stopAmbientBed();
   }
 
   // ============================================================================
   // 2. OBJECT-MATCHED PHYSICAL-MODELING SOUND EFFECTS
   // ============================================================================
+
+  // Per-call SFX bus (distance-attenuated when options carry a distance).
+  _sfxBus() {
+    return this._bus || this.sfxGain;
+  }
+
+  // Distance attenuation curve: 1 at the listener, 0 at maxDistance.
+  _attenuation(distance, maxDistance = 40) {
+    if (!(distance > 0)) return 1;
+    if (distance >= maxDistance) return 0;
+    const t = 1 - distance / maxDistance;
+    return Math.pow(t, 1.5);
+  }
+
+  // Positional world sound: volume falls off with distance from the listener.
+  // (sx, sz) = sound source world pos, (lx, lz) = listener world pos.
+  playPositional(type, sx, sz, lx, lz, maxDistance = 40, extraOptions = {}) {
+    const d = Math.hypot((sx || 0) - (lx || 0), (sz || 0) - (lz || 0));
+    this.playSFX(type, { ...extraOptions, distance: d, maxDistance });
+  }
+
   playSFX(type, options = {}) {
     this.init();
     this.resume();
     if (!this.initialized || this.muted || !this.ctx) return;
+
+    // Distance attenuation: sounds far from the listener get quieter, and
+    // sounds beyond maxDistance are skipped entirely.
+    this._bus = this.sfxGain;
+    let attenuationBus = null;
+    if (options && typeof options.distance === 'number') {
+      const scalar = this._attenuation(options.distance, options.maxDistance || 40);
+      if (scalar <= 0.001) { this._bus = null; return; }
+      attenuationBus = this.ctx.createGain();
+      attenuationBus.gain.value = scalar;
+      attenuationBus.connect(this.sfxGain);
+      this._bus = attenuationBus;
+    }
 
     const now = this.ctx.currentTime;
     const classKey = options.classKey || window.game?.selectedClass || 'juggernaut';
@@ -441,6 +717,9 @@ export class AudioManager {
       case 'war_horn':
         this.playBrazenWarHornSFX(now);
         break;
+      case 'boss_stinger':
+        this.playBossStinger();
+        break;
       case 'ui_click':
         this.playStoneRuneClickSFX(now);
         break;
@@ -451,6 +730,61 @@ export class AudioManager {
         this.playStoneRuneClickSFX(now);
         break;
     }
+
+    // All recipe nodes connected synchronously above; release the per-call bus
+    // so a later direct recipe call can't inherit stale attenuation.
+    this._bus = null;
+    if (attenuationBus) {
+      setTimeout(() => { try { attenuationBus.disconnect(); } catch (_) {} }, 3000);
+    }
+  }
+
+  // Boss stinger: sub drop + dissonant brass cluster swell + war drums + dark choir.
+  playBossStinger() {
+    this.init();
+    this.resume();
+    if (!this.initialized || this.muted || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const bus = this._sfxBus();
+
+    // Seismic sub drop
+    this.playPartial(95, 27, now, 1.15, 'sine', 0.50);
+
+    // Dissonant low-brass cluster swell (D2 + Eb2 + A2 + Bb2)
+    [73.42, 77.78, 110.00, 116.54].forEach((f, idx) => {
+      const osc = this.ctx.createOscillator();
+      const filter = this.ctx.createBiquadFilter();
+      const gain = this.ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(f * 0.94, now);
+      osc.frequency.exponentialRampToValueAtTime(f, now + 0.5);
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(240, now);
+      filter.frequency.exponentialRampToValueAtTime(1200, now + 0.9);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(idx < 2 ? 0.20 : 0.14, now + 0.35);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 2.1);
+      osc.connect(filter); filter.connect(gain); gain.connect(bus);
+      osc.start(now); osc.stop(now + 2.15);
+    });
+
+    // War-drum hits
+    this.playTaikoDrum(now, 0.30);
+    this.playTaikoDrum(now + 0.30, 0.34);
+    this.playWarTom(now + 0.15, 100, 0.16);
+
+    // Dark choir swell (minor second rub)
+    [146.83, 155.56, 220.00].forEach(f => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(f, now);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(0.10, now + 0.5);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 2.0);
+      osc.connect(gain); gain.connect(bus);
+      osc.start(now); osc.stop(now + 2.05);
+    });
   }
 
   // Helper: Filtered Noise Burst (for wind whooshes, fire roar, blade slices, shatter debris)
@@ -474,7 +808,7 @@ export class AudioManager {
 
     src.connect(filter);
     filter.connect(gain);
-    gain.connect(this.sfxGain);
+    gain.connect(this._sfxBus());
 
     src.start(time);
     src.stop(time + duration + 0.02);
@@ -494,7 +828,7 @@ export class AudioManager {
     gain.gain.exponentialRampToValueAtTime(0.001, time + duration);
 
     osc.connect(gain);
-    gain.connect(this.sfxGain);
+    gain.connect(this._sfxBus());
     osc.start(time);
     osc.stop(time + duration + 0.01);
   }
@@ -651,6 +985,7 @@ export class AudioManager {
 
   playBrazenWarHornSFX(now) {
     // Rich Viking/Covenant Brass Horn Fifth (D3 + A3 + D4) with warm brass filter swell
+    const bus = this._sfxBus();
     const freqs = [146.83, 220.00, 293.66];
     freqs.forEach((f, idx) => {
       const osc = this.ctx.createOscillator();
@@ -671,7 +1006,7 @@ export class AudioManager {
 
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.sfxGain);
+      gain.connect(bus);
 
       osc.start(now);
       osc.stop(now + 1.7);
@@ -701,6 +1036,10 @@ export class AudioManager {
 
   destroy() {
     this.stopAmbient();
+    if (this._visibilityHandler && typeof document !== 'undefined' && document.removeEventListener) {
+      try { document.removeEventListener('visibilitychange', this._visibilityHandler); } catch (_) {}
+      this._visibilityHandler = null;
+    }
     if (this.ctx) {
       this.ctx.close().catch(() => {});
       this.initialized = false;
