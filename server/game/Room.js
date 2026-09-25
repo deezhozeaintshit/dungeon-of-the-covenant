@@ -18,6 +18,10 @@ const MetaProgression = require('./systems/MetaProgression');
 const { Objectives } = require('./systems/Objectives');
 // Phase 2 signature features (workstream 6)
 const Oaths = require('./systems/Oaths');
+
+// Phase 4 (workstream 4): Endless Rift mode — server-authoritative tier
+// scaling, affixes, keystone economy, and rift leaderboards.
+const Rift = require('./systems/Rift');
 // Phase 3 cosmetic shop (workstream 6) — server-side ownership validation for
 // skin / weapon-glow equips and emotes. Cosmetics are visual only.
 const authService = require('../authService');
@@ -63,6 +67,11 @@ class Room {
     this.boss = null;
     this.corpses = []; // For Necromancer Corpse Explosion
     this.floor = 1;
+    // Phase 4 (workstream 4): Endless Rift state. 0 = campaign room.
+    // Set by the server before startDungeon(); never sent by clients.
+    this.riftTier = 0;
+    this.riftAffixes = [];
+    this.riftPact = false;
     this.proceduralConfig = ProceduralLevelGenerator.generate(1);
 
     // War Horn state
@@ -97,7 +106,8 @@ class Room {
       oaths: Oaths,
       metaProgression: MetaProgression, // Phase 3: persistent account ranks/unlocks
       livingDungeon: LivingDungeon,
-      nemesis: Nemesis
+      nemesis: Nemesis,
+      rift: Rift // Phase 4 (workstream 4): Endless Rift mode systems
     };
     this.systems.livingDungeon.init(this);
     this.systems.nemesis.init(this);
@@ -251,6 +261,13 @@ class Room {
       });
     }
 
+    // Phase 4 (workstream 4): late joiners to a pact-paid rift delve bear the
+    // same binding — the gate drinks from everyone. Tier gating for late
+    // joiners is enforced in server.js 'join_room'.
+    if (this.riftTier > 0 && this.riftPact && !isBot) {
+      this.systems?.rift?.applyPactToPlayer(this, player);
+    }
+
     return player;
   }
 
@@ -265,7 +282,11 @@ class Room {
     this.startTime = Date.now();
     this.floor = 1;
     // Always generate a brand-new random level (Biome, Boss, Enemies, Props & Loot) on match start!
-    this.proceduralConfig = ProceduralLevelGenerator.generate(this.floor);
+    // PHASE 4 (workstream 1): daily-delve rooms use the day's deterministic
+    // seed so every player runs the SAME dungeon today.
+    this.proceduralConfig = (this.dailySeed != null)
+      ? ProceduralLevelGenerator.generate(this.floor, this.dailySeed)
+      : ProceduralLevelGenerator.generate(this.floor);
 
     // Fill empty slots with companion bots if fewer than 4 players
     const availableClasses = ['cleric', 'juggernaut', 'mage', 'rogue', 'ranger', 'necromancer'];
@@ -391,6 +412,8 @@ class Room {
     // handleEntityDeath boss detection + soul-seal ward hook.
     this.boss.isBoss = true;
     this.boss.sealsRemaining = this.sanctumSealsRemaining;
+    // Phase 4 (workstream 4): rift tier scaling on the boss (server-side).
+    if (this.riftTier > 0) this.systems.rift.scaleBossSpawn(this, this.boss);
     this.broadcast({
       type: 'boss_spawn',
       boss: {
@@ -462,6 +485,12 @@ class Room {
 
     const stats = Archetypes.buildMobStats(type, biomeId, this.floor);
 
+    // Phase 4 (workstream 4): Endless Rift — server-authoritative tier
+    // scaling applied to the archetype stats. The client never sends these.
+    if (this.riftTier > 0) {
+      this.systems.rift.scaleMobStats(stats, this.riftTier, this.riftAffixes);
+    }
+
     const mob = {
       id,
       type: stats.type,        // canonical archetype id (legacy name resolved)
@@ -507,6 +536,8 @@ class Room {
         if (mob.isDead) return { damageDealt: 0, combo: null, isDead: true, killer: attacker };
         let amt = Math.max(0, Math.round(amount));
         amt = Elites.absorbDamage(mob, amt);
+        // Phase 4 (workstream 4): rift 'shielded' affix absorb (no-op outside rifts).
+        amt = self.systems?.rift?.absorbShield(mob, amt) ?? amt;
         amt = Math.round(amt * (self.systems?.livingDungeon?.getDamageTakenMult(mob, damageType) ?? 1));
         const buffMult = (attacker && attacker.damageBuff) ? attacker.damageBuff : 1.0;
         const scaledAmount = Math.round(amt * buffMult);
@@ -534,6 +565,10 @@ class Room {
 
     // Phase 2 AI brain — server-authoritative state machine (workstream 1).
     mob._brain = new EnemyBrain(mob);
+
+    // Phase 4 (workstream 4): rift per-mob affix state (shield timers,
+    // relentless CC immunity, swarming twin). No-op outside rift rooms.
+    if (this.riftTier > 0) this.systems.rift.applyMobAffixes(this, mob);
 
     this.mobs.push(mob);
 
@@ -1534,6 +1569,9 @@ class Room {
     this.systems?.oaths?.checkShrineProximity(this);
     this.systems?.livingDungeon?.onRoomTick(this);
     this.systems?.nemesis?.onRoomTick(this);
+    // Phase 4 (workstream 4): Endless Rift affix runtime (molten patches,
+    // shielded refresh, relentless CC purge). No-op outside rift rooms.
+    this.systems?.rift?.onTick(this, simDt);
 
     // 2. Update AI Companion Bots
     this.updateBots(simDt);
@@ -2202,6 +2240,8 @@ class Room {
 
     // Iron Vigil: -30% damage taken (oath multiplier, rounded once).
     amount = Math.round(amount * (this.systems?.oaths?.getDamageTakenMult(player) ?? 1));
+    // Phase 4 (workstream 4): Rift Pact binding — +10% damage taken, run-long.
+    amount = Math.round(amount * (this.systems?.rift?.getPlayerDamageTakenMult(player) ?? 1));
     // Nemesis grudge: +30% vs the nemesis's grudge target.
     if (attacker) amount = this.systems?.nemesis?.modifyDamageToPlayer(attacker, player, amount) ?? amount;
 
@@ -2210,6 +2250,10 @@ class Room {
       sourceName,
       attackerId: attacker?.id || null
     });
+
+    // Phase 4 (workstream 4): rift 'vampiric' affix — enemies heal a slice of
+    // the damage they deal. No-op outside rift rooms.
+    this.systems?.rift?.onPlayerDamaged(this, player, attacker, res?.dealt || 0);
 
     if (res && (res.downed || res.killed)) {
       this.systems?.livingDungeon?.recordDeath(this, player);
@@ -2497,7 +2541,11 @@ class Room {
     const biomeId = (this.proceduralConfig && this.proceduralConfig.biome && this.proceduralConfig.biome.id) || 'ossuary_crypt';
     const dropTier = isBoss ? 'boss' : (isElite ? 'elite' : 'trash');
     if (LootGenerator.rollDropChance(dropTier, biomeId)) {
-      const dropItem = LootGenerator.generateItem(this.floor, isBoss ? 'boss' : (isElite ? 'elite' : 'mob'), biomeId);
+      // Phase 4 (workstream 4): rift rooms roll through the same Phase 3
+      // drop tables with a tier-derived rarity bonus (extend, don't fork).
+      const dropItem = this.riftTier > 0
+        ? this.systems.rift.generateRiftItem(this.riftTier, isBoss ? 'boss' : (isElite ? 'elite' : 'mob'), biomeId)
+        : LootGenerator.generateItem(this.floor, isBoss ? 'boss' : (isElite ? 'elite' : 'mob'), biomeId);
       this.spawnFloorLoot('gear_drop', entity.x + 0.8, entity.z + 0.6, dropItem.gearScore, dropItem.name, true, dropItem);
     }
 
@@ -2584,6 +2632,8 @@ class Room {
     this.systems?.objectives?.onEnemyKilled(this, entity, killer);
     this.systems?.oaths?.onKill(this, entity, killer);
     this.systems?.livingDungeon?.recordKill(this, entity, killer);
+    // Phase 4 (workstream 4): rift 'volatile' detonation. No-op outside rifts.
+    this.systems?.rift?.onMobDeath(this, entity, killer);
   }
 
   triggerBossDefeated(killer) {
@@ -2617,6 +2667,10 @@ class Room {
     }
 
     this.recordPotgCandidate('boss_kill', killer, `${killer ? killer.name : 'Party'} landed the decisive killing blow on Malakor!`);
+
+    // Phase 4 (workstream 4): rift clear — tier unlock, daily delve bonus,
+    // deepest-tier leaderboard submit. Single execution, server-measured.
+    if (this.riftTier > 0) this.systems?.rift?.onRiftCleared(this, killer);
   }
 
   generatePostGameSummary() {
@@ -2656,6 +2710,10 @@ class Room {
     // victory). Computed entirely server-side — client totals are never read.
     const metaRewards = MetaProgression.grantRunRewards(this, { victory: true });
 
+    // Phase 4 (workstream 4): campaign victory earns a rift keystone and
+    // unlocks Rift Tier 1 (skipped for rift rooms — those pay daily delve).
+    if (this.riftTier < 1) this.systems?.rift?.onCampaignVictory(this);
+
     this.broadcast({
       type: 'run_completed',
       summary: {
@@ -2679,6 +2737,31 @@ class Room {
       // screen covenant panel). Empty for guests/bots.
       meta: metaRewards
     });
+
+    // PHASE 4 (workstream 1): daily-delve speed leaderboard. Clear time is
+    // server-measured (endTime - startTime) and recorded only on victory;
+    // client-sent times are never read (anti-spoof).
+    if (this.isDailyDelve) {
+      try {
+        const Leaderboards = require('./systems/Leaderboards');
+        const humans = Object.values(this.players || {})
+          .filter(p => !p.isBot && p.accountUsername);
+        for (const p of humans) {
+          const profile = authService.getProfileByUsername(p.accountUsername);
+          Leaderboards.submit('daily_delve_speed', {
+            username: p.accountUsername,
+            displayName: (profile && profile.displayName) || p.name,
+            value: durationSec,
+            meta: {
+              clearTimeSec: durationSec,
+              date: this.dailyDate || null,
+              seed: this.dailySeed != null ? this.dailySeed : null,
+              partySize: humans.length
+            }
+          });
+        }
+      } catch (e) { /* leaderboards must never break the victory flow */ }
+    }
   }
 
   recordPotgCandidate(type, hero, description) {
@@ -2963,6 +3046,8 @@ class Room {
         oathState: p.oathState || { oaths: [] }
       })),
       boss: this.boss ? this.boss.getState() : null,
+      // Phase 4 (workstream 4): rift state for the HUD (null in campaign).
+      rift: this.systems?.rift?.getPublicState(this) || null,
       // Phase 2 (enemies/PROTOCOL.md): mob sync payload for client
       // EnemyVisuals.syncElites.
       mobs: this.mobs.filter(m => !m.isDead).map(m => ({

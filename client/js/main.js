@@ -34,6 +34,8 @@ import { MinimapEnhanced } from './minimapenhanced.js';
 // quality-of-life settings (reduced motion honoring prefers-reduced-motion).
 import { EnhancedCombatVFX } from './enhancedcombatvfx.js?v=9.1';
 import { PerformanceMonitor } from './performancemonitor.js?v=9.1';
+// Phase 4 (workstream 6: PERFORMANCE PASS): distance-LOD tiers for enemies.
+import { LODManager } from './perf/lodSystem.js?v=9.2';
 import { QualityOfLife } from './qualityoflife.js?v=9.1';
 // Phase 4 (workstream 3): one-tap 30s gameplay clip capture (ring buffer)
 // for the TikTok marketing flywheel.
@@ -43,6 +45,12 @@ import { initClipButton } from './clipUI.js?v=4.0';
 import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
 import { initOathModal } from './ui/oathModal.js';
 import { initMetaProgression } from './ui/metaProgression.js';
+// Phase 4 (workstream 1): seasons + battle pass + daily delve + leaderboards.
+import { initSeasonPass } from './ui/seasonPass.js';
+// Phase 4 (workstream 4): Endless Rift mode — rift gate portal, in-rift HUD
+// (tier + affix icons), and tier-clear banner. Display-only; the server is
+// authoritative for affixes, scaling, unlocks, and keystones.
+import { initRiftUI } from './ui/riftUI.js';
 // Phase 3: server-authoritative loot inventory + equipment panel (workstream 2).
 import { initInventoryPanel } from './ui/inventory.js';
 
@@ -292,6 +300,13 @@ class GameApp {
       this.feelFX = new EnhancedCombatVFX(this.renderer.scene);
       this.perfMonitor = new PerformanceMonitor();
       this.perfMonitor.start();
+      // Phase 4 (workstream 6: PERFORMANCE PASS): distance-LOD tiers for
+      // enemies (+ far-tier impostor for the Cinder Thrall GLB). Static prop
+      // InstancedMesh batching is on by default inside PropPlacer.
+      this.lodManager = new LODManager();
+      if (this.entities && typeof this.entities.setLodManager === 'function') {
+        this.entities.setLodManager(this.lodManager);
+      }
       this.qol = new QualityOfLife(this);
       this.qol.loadSettings();
       // prefers-reduced-motion: OS-level signal disables shake + hit-stop
@@ -372,6 +387,44 @@ class GameApp {
       }
     }
     this.metaUI.refresh();
+
+    // Phase 4 seasons + battle pass (workstream 1): daily-delve banner,
+    // season pass panel, weekly leaderboards. Server-authoritative; every
+    // pass reward is a cosmetic — never pay-to-win.
+    this.seasonUI = initSeasonPass({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      getAuthToken: () => this.authToken,
+      getPlayerName: () => (document.getElementById('player-name-input') || {}).value || 'Hero',
+      getChosenClass: () => this.selectedClass || 'juggernaut',
+      mergeCosmeticDefs: (defs) => {
+        const ent = this.app && this.app.entities;
+        if (!ent) return;
+        if (!(ent.cosmeticDefs instanceof Map)) ent.cosmeticDefs = new Map();
+        for (const d of defs) ent.cosmeticDefs.set(d.id, d);
+      },
+      onClaim: () => { if (this.audio && this.audio.playSFX) this.audio.playSFX('powerup'); }
+    });
+    this.seasonUI.refresh();
+
+    // Phase 4 Endless Rift (workstream 4): rift gate portal + in-rift HUD.
+    // Server-authoritative: the client renders state and sends { tier,
+    // payment } only — affixes, scaling, and unlocks come from the server.
+    this.riftUI = initRiftUI({
+      network: this.network,
+      getAuthToken: () => this.authToken,
+      getPlayerName: () => (document.getElementById('player-name-input') || {}).value || 'Hero',
+      getChosenClass: () => this.selectedClass || 'juggernaut'
+    });
+    if (this.riftUI && this.riftUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.riftUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
+    }
+    const riftGateBtn = document.getElementById('btn-rift-gate');
+    if (riftGateBtn && this.riftUI) {
+      riftGateBtn.addEventListener('click', () => this.riftUI.open());
+    }
 
     // Phase 3: server-authoritative inventory + equipment (workstream 2).
     // The panel is display-only; equip/unequip send id/slot to the server,
@@ -652,6 +705,8 @@ class GameApp {
           this.narrator.say(`Welcome back, ${data.profile.displayName || username}! Cloud stats & gear restored.`, 'info');
           // Phase 3: refresh covenant rank / vault state for the new session.
           if (this.metaUI) this.metaUI.refresh();
+          // Phase 4: refresh season pass / banner state for the new session.
+          if (this.seasonUI) this.seasonUI.refresh();
         } else {
           if (badge) badge.innerText = `⚠️ ${data?.error || 'Auth failed'}`;
         }
@@ -1570,6 +1625,10 @@ class GameApp {
     document.getElementById('game-hud').classList.remove('hidden');
     this.controls.setSkillInfo(CLASSES[this.selectedClass].abilities);
     this.audio.playSFX('powerup');
+    // Phase 4 (workstream 3): start the rolling 30s clip buffer now that
+    // real gameplay footage is rendering. start() is a safe no-op when the
+    // recorder is already buffering or unsupported in this browser.
+    if (this.clipRecorder) this.clipRecorder.start();
   }
 
   handleSnapshot(snap) {
@@ -1838,6 +1897,8 @@ class GameApp {
       }
     }
     if (this.metaUI) this.metaUI.refresh();
+    // Phase 4: season XP changed — refresh the pass tier/progress UI.
+    if (this.seasonUI) this.seasonUI.refresh();
   }
 
   renderLoop(time) {
@@ -1894,6 +1955,10 @@ class GameApp {
     this.combat.update(dt);
     this.loot.update(dt);
     this.entities.update(dt);
+    // Phase 4 (workstream 6: PERFORMANCE PASS): enemy LOD tiers (throttled
+    // internally) + distance LOD for instanced prop decor parts.
+    if (this.lodManager) this.lodManager.update(this.renderer.camera);
+    if (this.dungeon && this.dungeon.propPlacer) this.dungeon.propPlacer.updateLOD(this.renderer.camera);
     // Phase 3 game feel: pooled particles, beams, rings, damage vignette.
     if (this.feelFX) this.feelFX.update(dt);
     // Phase 2: enemy telegraph/progress visuals + oath shrine proximity tick.

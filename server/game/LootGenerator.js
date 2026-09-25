@@ -124,10 +124,14 @@ class LootGenerator {
     );
   }
 
-  static generateItem(floor = 1, sourceType = 'mob', biomeId = DEFAULT_BIOME) {
+  // Phase 4 (rift): optional 4th param opts { rarityBonus } — flat bonus
+  // points folded into rollRarity (same unit as biome rarityBonus).
+  // Backward compatible: omitted opts behave exactly as before.
+  static generateItem(floor = 1, sourceType = 'mob', biomeId = DEFAULT_BIOME, opts = {}) {
     const resolvedBiome = _resolveBiome(biomeId);
     const table = BIOME_LOOT[resolvedBiome];
-    const rarity = this.rollRarity(floor, sourceType, table.rarityBonus);
+    const extraBonus = Number.isFinite(Number(opts.rarityBonus)) ? Math.max(0, Number(opts.rarityBonus)) : 0;
+    const rarity = this.rollRarity(floor, sourceType, table.rarityBonus + extraBonus);
     const base = BASE_ITEMS[Math.floor(Math.random() * BASE_ITEMS.length)];
 
     // Biome affix bias: 55% chance each affix slot rolls from a bias-matching
