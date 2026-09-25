@@ -31,6 +31,9 @@ export class EntityManager {
     this.scene.add(this.targetReticle);
     // Shared PMREM environment for character PBR materials (set via setRenderer).
     this._charEnvMap = null;
+    // Cinder thrall death crumbles: meshes removed from mobMeshes but kept
+    // in-scene while the crumble/sink + fade plays (~1.5s).
+    this._cinderDeaths = new Map();
   }
 
   // characters track: give EntityManager the WebGLRenderer so character PBR
@@ -114,6 +117,164 @@ export class EntityManager {
       undefined,
       () => {}
     );
+  }
+
+  // --- CINDER THRALL (forge elite) -----------------------------------------
+  // Mounts the lava-rock brute GLB (unrigged, procedural profile) and wires
+  // lava-crack emissive glow + a self-pooled shoulder ember wisp emitter.
+  // Death is handled by _beginCinderDeath / _tickCinderDeath (crumble + sink
+  // + fade, owned by this._cinderDeaths instead of instant removal).
+  _mountCinderThrall(group, cinderRoot, scale) {
+    const url = '/assets/models/cinder_thrall.glb';
+    const c = group.userData.cinder;
+    const mount = (gltfScene) => {
+      const clone = gltfScene.clone(true);
+      clone.scale.set(scale, scale, scale);
+      clone.traverse((node) => {
+        if (!node.isMesh) return;
+        node.castShadow = true;
+        node.receiveShadow = true;
+        // Per-instance material clones: the emissive pulse and death fade
+        // mutate materials, so sharing the cached scene's materials would
+        // bleed one thrall's death into another.
+        const srcMats = Array.isArray(node.material) ? node.material : [node.material];
+        const mats = [];
+        for (const src of srcMats) {
+          if (!src || !src.isMeshStandardMaterial) { mats.push(src); continue; }
+          const mat = src.clone();
+          // Lava-crack glow: reuse the albedo as the emissive map — the
+          // bright orange cracks glow while the dark basalt stays dark.
+          if (mat.map && !mat.emissiveMap) mat.emissiveMap = mat.map;
+          mat.emissive = new THREE.Color(0xff5a1a);
+          mat.emissiveIntensity = 0.85;
+          mats.push(mat);
+          c.mats.push(mat);
+        }
+        node.material = Array.isArray(node.material) ? mats : mats[0];
+      });
+      // Shoulder anchors for the ember wisp emitter (from the model bbox).
+      const bbox = new THREE.Box3().setFromObject(clone);
+      const size = bbox.getSize(new THREE.Vector3());
+      c.shoulderL = new THREE.Vector3(-size.x * 0.32, size.y * 0.78, 0);
+      c.shoulderR = new THREE.Vector3(size.x * 0.32, size.y * 0.78, 0);
+      cinderRoot.add(clone);
+      c.model = clone;
+      c.loaded = true;
+      this._initCinderWisps(group);
+      upgradeCharacterMaterials(clone, this._charEnvMap);
+      enableCharacterLightLayer(clone);
+    };
+    if (this.glbCache[url]) {
+      mount(this.glbCache[url]);
+      return;
+    }
+    // Plain GLB, no compression: GLTFLoader handles it directly.
+    this.gltfLoader.load(url, (gltf) => {
+      this.glbCache[url] = gltf.scene;
+      mount(gltf.scene);
+    }, undefined, () => {});
+  }
+
+  // Ember wisp emitter: one self-pooled THREE.Points per thrall, 26 rising
+  // sparks from the shoulders. Local to this module (no particle-system
+  // dependency) so it works regardless of other workstreams.
+  _initCinderWisps(group) {
+    const c = group.userData.cinder;
+    if (!c || c.wisps || !c.shoulderL) return;
+    const N = 26;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(N * 3), 3));
+    const points = new THREE.Points(geo, new THREE.PointsMaterial({
+      color: 0xff7733, size: 0.09, transparent: true, opacity: 0.9,
+      blending: THREE.AdditiveBlending, depthWrite: false, sizeAttenuation: true
+    }));
+    points.frustumCulled = false;
+    c.root.add(points);
+    c.wisps = points;
+    c.wispData = [];
+    for (let i = 0; i < N; i++) c.wispData.push(this._resetCinderWisp(c, true));
+  }
+
+  _resetCinderWisp(c, randomAge) {
+    const side = Math.random() < 0.5 ? c.shoulderL : c.shoulderR;
+    const maxLife = 1.2 + Math.random() * 0.8;
+    return {
+      x: side.x + (Math.random() - 0.5) * 0.25,
+      y: side.y + (Math.random() - 0.5) * 0.2,
+      z: side.z + (Math.random() - 0.5) * 0.25,
+      vx: (Math.random() - 0.5) * 0.2,
+      vy: 0.5 + Math.random() * 0.7,
+      vz: (Math.random() - 0.5) * 0.2,
+      life: randomAge ? Math.random() * maxLife : 0,
+      maxLife
+    };
+  }
+
+  _tickCinderWisps(group, dt) {
+    const c = group.userData.cinder;
+    if (!c || !c.wisps) return;
+    const pos = c.wisps.geometry.getAttribute('position');
+    for (let i = 0; i < c.wispData.length; i++) {
+      const w = c.wispData[i];
+      w.life += dt;
+      if (w.life >= w.maxLife) Object.assign(w, this._resetCinderWisp(c, false));
+      pos.setXYZ(i, w.x + w.vx * w.life, w.y + w.vy * w.life, w.z + w.vz * w.life);
+    }
+    pos.needsUpdate = true;
+    c.wisps.material.opacity = c.dying ? Math.max(0, 0.9 * (1 - c.deathT / 1.4)) : 0.9;
+  }
+
+  // Per-frame update for cinder thrall meshes (called from the mob loop and
+  // the death-crumble loop in animate()).
+  _updateCinderThrall(group, dt) {
+    const c = group.userData.cinder;
+    if (!c || !c.loaded) return;
+    c.emberT += dt;
+    // Lava-crack emissive pulse.
+    const pulse = 0.72 + 0.38 * Math.sin(c.emberT * 2.3);
+    for (const mat of c.mats) {
+      if (mat.emissive) mat.emissiveIntensity = 0.85 * pulse;
+    }
+    this._tickCinderWisps(group, dt);
+    if (c.dying) this._tickCinderDeath(group, dt);
+  }
+
+  // Death: crumble/sink pose (sticky, from the CinderThrall profile) plus a
+  // local material fade. The mesh is moved from mobMeshes to _cinderDeaths
+  // so syncMobs doesn't resurrect it; the fade owns removal after ~1.5s.
+  _beginCinderDeath(id, mesh) {
+    const c = mesh.userData.cinder;
+    if (!c || c.dying) return;
+    c.dying = true;
+    c.deathT = 0;
+    if (mesh.userData.barSprite) mesh.userData.barSprite.visible = false;
+    if (mesh.userData.eliteAura) mesh.userData.eliteAura.visible = false;
+    if (mesh.userData.stealthVeil) mesh.userData.stealthVeil.visible = false;
+    if (mesh.userData.animator) {
+      try { mesh.userData.animator.play('death', { sticky: true }); } catch (e) {}
+    }
+    for (const mat of c.mats) mat.transparent = true;
+    mesh.userData.deathId = id;
+    this.mobMeshes.delete(id);
+    this._cinderDeaths.set(id, mesh);
+  }
+
+  _tickCinderDeath(group, dt) {
+    const c = group.userData.cinder;
+    c.deathT += dt;
+    const k = Math.min(1, c.deathT / 1.4);
+    for (const mat of c.mats) mat.opacity = 1 - k;
+    if (c.deathT >= 1.5) {
+      this._cinderDeaths.delete(group.userData.deathId);
+      this.scene.remove(group);
+      group.traverse((node) => {
+        if (node.geometry) node.geometry.dispose();
+        if (node.material) {
+          const mats = Array.isArray(node.material) ? node.material : [node.material];
+          for (const m of mats) if (m && m.dispose) m.dispose();
+        }
+      });
+    }
   }
 
   createTargetReticle() {
@@ -1052,6 +1213,11 @@ export class EntityManager {
         if (this.onMobRemoved && mesh && mesh.position) {
           try { this.onMobRemoved(id, mesh.position.x, mesh.position.z); } catch (e) { /* VFX must never break sync */ }
         }
+        // Cinder thrall: crumble/sink death anim instead of instant removal.
+        if (mesh.userData && mesh.userData.cinder && !mesh.userData.cinder.dying) {
+          this._beginCinderDeath(id, mesh);
+          continue;
+        }
         this.scene.remove(mesh);
         this.mobMeshes.delete(id);
       }
@@ -1196,27 +1362,27 @@ export class EntityManager {
       poisonArrow.position.set(0, 1.15, 0.62);
       bodyRoot.add(bow, poisonArrow);
     } else if (m.type === 'cinder_thrall') {
-      // 3. BLAZING MAGMA ELEMENTAL (Floating Molten Core + Orbiting Obsidian Shards)
-      const lavaMat = new THREE.MeshStandardMaterial({ color: 0xff5500, emissive: 0xff3300, emissiveIntensity: 3.2, roughness: 0.2 });
-      const obsidianMat = new THREE.MeshStandardMaterial({ color: 0x1e1618, metalness: 0.7, roughness: 0.35 });
-
-      const core = new THREE.Mesh(new THREE.DodecahedronGeometry(0.56, 1), lavaMat);
-      core.position.y = 1.25;
-      bodyRoot.add(core);
-
-      const fireCrown = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.75, 7), lavaMat);
-      fireCrown.position.y = 1.85;
-      bodyRoot.add(fireCrown);
-
-      orbitGroup = new THREE.Group();
-      orbitGroup.position.y = 1.22;
-      for (let i = 0; i < 6; i++) {
-        const ang = (i * Math.PI * 2) / 6;
-        const rock = new THREE.Mesh(new THREE.OctahedronGeometry(0.24, 0), obsidianMat);
-        rock.position.set(Math.cos(ang) * 0.88, (i % 2 === 0 ? 0.18 : -0.18), Math.sin(ang) * 0.88);
-        orbitGroup.add(rock);
-      }
-      bodyRoot.add(orbitGroup);
+      // 3. CINDER THRALL — forge elite: lava-rock brute GLB (unrigged),
+      //    driven by the CinderThrall procedural pose profile
+      //    (see animation/ProceduralFallback.js). Lava-crack glow, ember
+      //    wisps, and a crumble/sink death are set up by _mountCinderThrall
+      //    and ticked by _updateCinderThrall in the per-frame mob loop.
+      const cinderRoot = new THREE.Group();
+      bodyRoot.add(cinderRoot);
+      group.userData.procProfile = 'cinderThrall';
+      group.userData.cinder = {
+        root: cinderRoot,
+        loaded: false,
+        dying: false,
+        deathT: 0,
+        emberT: Math.random() * 10,
+        mats: [],
+        wisps: null,
+        wispData: [],
+        shoulderL: null,
+        shoulderR: null
+      };
+      this._mountCinderThrall(group, cinderRoot, m.modelScale || 1.25);
     } else if (m.type === 'void_assassin') {
       // 4. 4-ARMED SHADOW MANTIS WRAITH (Floating Dimensional Reaper with 4 Violet Scythe Blades)
       const voidMat = new THREE.MeshStandardMaterial({ color: 0x160b29, roughness: 0.3, metalness: 0.8 });
@@ -1747,17 +1913,31 @@ export class EntityManager {
         mu.animator.setLocomotion({ moving: !!mu.isMoving, running: false });
         mu.animator.update(dt);
         updateCombatAnimation(mobGroup, dt);
+        // Cinder thrall: lava-crack pulse + ember wisps (+ death fade).
+        if (mu.cinder) this._updateCinderThrall(mobGroup, dt);
         continue;
       }
       mu.phase = (mu.phase || 0) + dt * 3.0;
       if (mu.orbitGroup) {
         mu.orbitGroup.rotation.y += dt * 2.8;
       }
-      if (mu.bodyRoot && (mu.mobType === 'cinder_thrall' || mu.mobType === 'void_assassin' || mu.mobType === 'blight_necrolyte' || mu.mobType === 'elite_lich')) {
+      if (mu.bodyRoot && (mu.mobType === 'void_assassin' || mu.mobType === 'blight_necrolyte' || mu.mobType === 'elite_lich')) {
         mu.bodyRoot.position.y = Math.sin(mu.phase) * 0.14;
       }
       // characters track: hit flash on damage
       updateCombatAnimation(mobGroup, dt);
+    }
+
+    // 3b. Cinder thrall death crumbles: removed from mobMeshes at death but
+    // kept in-scene while the crumble/sink + fade plays (~1.5s).
+    for (const mesh of this._cinderDeaths.values()) {
+      const mu = mesh.userData;
+      if (!mu) continue;
+      if (mu.animator) {
+        mu.animator.update(dt);
+        updateCombatAnimation(mesh, dt);
+      }
+      if (mu.cinder) this._updateCinderThrall(mesh, dt);
     }
 
     // 4. Boss combat animation (death tip-over + fade) & character lighting rig

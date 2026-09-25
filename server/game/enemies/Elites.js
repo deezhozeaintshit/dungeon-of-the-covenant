@@ -2,7 +2,8 @@
 // Dungeon of the Covenant — Phase 2
 // server/game/enemies/Elites.js
 // Elite variants: an affix system applied as stat/behavior modifiers
-// on top of the base elite archetypes (elite_executioner, elite_lich).
+// on top of the base elite archetypes (elite_executioner, elite_lich,
+// cinder_thrall — see Archetypes.js).
 //
 // Affixes: Swift, Brutal, Vampiric, Shielded, Explosive.
 // Each affix carries an aura color the server syncs so the client can

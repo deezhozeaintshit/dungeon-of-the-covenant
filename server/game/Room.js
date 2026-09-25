@@ -493,6 +493,7 @@ class Room {
       projectile: stats.projectile,
       volley: stats.volley,
       slamAttack: stats.slamAttack,
+      burnOnHit: stats.burnOnHit,
       healAmount: stats.healAmount,
       healRange: stats.healRange,
       healCooldown: stats.healCooldown,
@@ -524,8 +525,9 @@ class Room {
       }
     };
 
-    // Wing Wardens: roll W1 elite affixes (brutal/swift/shielded/vampiric...).
-    if (mob.type === 'elite_executioner' || mob.type === 'elite_lich') {
+    // Wing Wardens: roll elite affixes for every elite-role archetype
+    // (elite_executioner, elite_lich, cinder_thrall).
+    if (mob.role === 'elite') {
       mob.isElite = true;
       Elites.applyAffixes(mob, Elites.rollAffixes(this.floor));
     }
@@ -1674,6 +1676,19 @@ class Room {
       }
       ComboEngine.tickStatuses(p, dt);
 
+      // Burn DoT (cinder thrall ignite rider): 'burning' potency is dps,
+      // ticked once per second while the status lasts. Server-side only.
+      if (!p.isDead && !p.isDowned && ComboEngine.hasStatus(p, 'burning')) {
+        p._burnTick = (p._burnTick || 0) + dt;
+        if (p._burnTick >= 1.0) {
+          p._burnTick = 0;
+          const dps = Math.max(1, Math.round((p.statuses.burning && p.statuses.burning.potency) || 5));
+          this.damagePlayer(p, dps, 'fire', 'Burning');
+        }
+      } else {
+        p._burnTick = 0;
+      }
+
       if (p.isDead) continue;
 
       if (p.isDowned) {
@@ -2201,6 +2216,19 @@ class Room {
       this.systems?.oaths?.onPlayerDowned(this, player);
     }
 
+    // Cinder thrall burn rider: heavy forge melee ignites the player.
+    // Server-authoritative DoT — 'burning' potency doubles as dps, ticked
+    // once per second in the Room player loop below.
+    if (attacker && attacker.burnOnHit && res && res.dealt > 0 && !player.isDead && !player.isDowned) {
+      ComboEngine.applyStatus(player, 'burning', attacker.burnOnHit.duration, attacker.burnOnHit.dps, attacker.id);
+      this.broadcast({
+        type: 'floating_text',
+        text: 'IGNITED!',
+        x: player.x, z: player.z,
+        style: 'crit'
+      });
+    }
+
     // Oath thorns (Iron Vigil +15) reflect flat damage onto the attacking mob.
     // Health.damagePlayer already handles player.thorns % reflect; this is the
     // separate oath-granted flat reflect.
@@ -2455,7 +2483,7 @@ class Room {
     this.corpses.push({ x: entity.x, z: entity.z, time: Date.now() });
 
     // Award Party XP & Spawn Loot
-    const isElite = (entity.type === 'elite_executioner' || entity.type === 'elite_lich');
+    const isElite = (entity.role === 'elite') || (entity.type === 'elite_executioner' || entity.type === 'elite_lich');
     const isBoss = (entity.isBoss || entity.id === 'boss_malakor');
     // Phase 2: XP routed through Progression with kill reason.
     Progression.grantPartyXP(this, isBoss ? 1000 : (isElite ? 250 : 45), isBoss ? 'boss' : (isElite ? 'elite' : 'kill'));

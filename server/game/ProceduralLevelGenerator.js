@@ -190,6 +190,16 @@ class ProceduralLevelGenerator {
       mobSpawns.push({ type: 'elite_lich', x: 9, z: -49, scaleMult });
     }
 
+    // Forge elite pool: blood_citadel floors field Cinder Thrall elites —
+    // slow lava-rock brutes whose hits ignite players (see Archetypes.js).
+    if (biome.id === 'blood_citadel') {
+      mobSpawns.push({ type: 'cinder_thrall', x: -20, z: -30, scaleMult });
+      mobSpawns.push({ type: 'cinder_thrall', x: 20, z: -30, scaleMult });
+      if (floorNumber >= 3) {
+        mobSpawns.push({ type: 'cinder_thrall', x: 0, z: -52, scaleMult });
+      }
+    }
+
     // 2. Generate 3D Blender GLB Level Design Props across the map
     const propAnchorSpots = [
       { x: -9, z: 16 },
