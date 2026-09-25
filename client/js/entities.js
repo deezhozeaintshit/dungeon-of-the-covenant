@@ -13,6 +13,7 @@ import { syncPlayerCosmetics, playEmote } from './cosmetics.js?v=9.0';
 // HD hero models (client/js/hdHeroes.js): flag-gated integration path for
 // real rigged GLB heroes. HD_HEROES_ENABLED=false => zero behavior change.
 import { HD_HEROES_ENABLED, mountHdHero, getHdModel } from './hdHeroes.js?v=9.0';
+import { HD_ENEMIES_ENABLED, HD_MOB_CLIP_PREFIXES, HD_MOB_CLIP_STATES, HD_BOSS_CLIP_PREFIXES, HD_BOSS_CLIP_STATES, mountHdMob, mountHdBoss, getHdEnemyModel, getHdBossModel } from './hdEnemies.js?v=9.0';
 // [perf-workstream] batched mob threat rings (Phase 4).
 import { RingBatcher, isRingBatchingEnabled } from './perf/ringBatcher.js';
 
@@ -103,6 +104,43 @@ export class EntityManager {
         group.userData._clipSetBound = true;
       } catch (err) {
         console.warn('[Phase2] hero clip set failed; procedural fallback active:', err);
+        group.userData._clipSetBound = false;
+      }
+    })();
+  }
+
+  // HD enemy/boss clip sets (client/js/hdEnemies.js). Mirrors _bindHeroClipSet
+  // but the prefix is per mob type / boss key (see HD_MOB_CLIP_PREFIXES) and
+  // there is no shared fallback set — missing files stay procedural. The
+  // prefix is retargeted bone->bone onto the mounted skinned rig (SKINNED
+  // path in detectRig). rot_hound binds nothing: quadruped, no Mixamo clips
+  // exist, procedural driver owns it. Never throws — _clipSetBound=false
+  // triggers a retry on the next sync pass.
+  _bindMobClipSet(group, mobType) {
+    const prefix = HD_MOB_CLIP_PREFIXES[mobType];
+    const states = HD_MOB_CLIP_STATES[mobType] || [];
+    if (!prefix || !states.length) return;
+    this._bindClipSetToGroup(group, prefix, states);
+  }
+
+  _bindBossClipSet(group, bossKey) {
+    const prefix = HD_BOSS_CLIP_PREFIXES[bossKey];
+    if (!prefix) return;
+    this._bindClipSetToGroup(group, prefix, HD_BOSS_CLIP_STATES);
+  }
+
+  _bindClipSetToGroup(group, prefix, states) {
+    const animator = group.userData.animator;
+    if (!animator || group.userData._clipSetBound === 'loading' || group.userData._clipSetBound === true) return;
+    group.userData._clipSetBound = 'loading';
+    (async () => {
+      try {
+        const set = await loadClipSet(prefix, group, { states });
+        animator.bindClipSet(set);
+        animator.refresh();
+        group.userData._clipSetBound = true;
+      } catch (err) {
+        console.warn(`[Phase2] mob clip set failed for ${prefix}; procedural fallback active:`, err);
         group.userData._clipSetBound = false;
       }
     })();
@@ -1349,6 +1387,21 @@ export class EntityManager {
       group.add(threatRing);
     }
 
+    // HD enemy path (client/js/hdEnemies.js): when the flag is on and the HD
+    // GLB for this mob type was preloaded, mount the real skinned model
+    // instead of the procedural mob. Graceful fallback to procedural below —
+    // getHdEnemyModel() returns null when disabled, unknown, or missing.
+    // (The threat ring above is shared by both paths.)
+    if (HD_ENEMIES_ENABLED) {
+      const hdGltf = getHdEnemyModel(m.type);
+      if (hdGltf && mountHdMob(group, m.type, hdGltf, {
+        manager: this, name: m.name, modelScale: m.modelScale
+      })) {
+        this._bindMobClipSet(group, m.type);
+        return group;
+      }
+    }
+
     const bodyRoot = new THREE.Group();
     group.add(bodyRoot);
     let orbitGroup = null;
@@ -1682,6 +1735,19 @@ export class EntityManager {
     const group = new THREE.Group();
     group.position.set(b.x, 0, b.z);
     group.scale.set(1.35, 1.35, 1.35);
+
+    // HD boss path (client/js/hdEnemies.js): when the flag is on and the HD
+    // GLB for this boss key (b.biomeId) was preloaded, mount the real
+    // skinned boss instead of the procedural molten colossus. Graceful
+    // fallback to procedural below — getHdBossModel() returns null when
+    // disabled, unknown, or missing.
+    if (HD_ENEMIES_ENABLED) {
+      const hdBossGltf = getHdBossModel(b.biomeId);
+      if (hdBossGltf && mountHdBoss(group, b.biomeId, hdBossGltf, { manager: this })) {
+        this._bindBossClipSet(group, b.biomeId);
+        return group;
+      }
+    }
 
     const bodyGroup = new THREE.Group();
     group.add(bodyGroup);
