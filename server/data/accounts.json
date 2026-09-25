@@ -1,0 +1,64 @@
+{
+  "beatshredder": {
+    "username": "beatshredder",
+    "passwordHash": "5f7b5d4c96eeb65bfc5396d52913e675b2b9b0b90b696ebdc127242df65a3501",
+    "token": "cov_tok_265118c30363836ff003f0758ad3abdf",
+    "profile": {
+      "username": "Beatshredder",
+      "displayName": "Beatshredder",
+      "level": 1,
+      "xp": 0,
+      "gold": 250,
+      "shards": 1550,
+      "unlockedAuras": [
+        "necro"
+      ],
+      "cosmeticAura": "necro",
+      "title": "Lich-Bane",
+      "mightRank": 0,
+      "vitalityRank": 0,
+      "hasteRank": 0,
+      "gearScore": 100,
+      "equippedItem": null,
+      "inventory": [],
+      "purchasedBundles": [],
+      "stats": {
+        "kills": 0,
+        "bossesSlain": 0,
+        "floorsCleared": 0,
+        "highestFloor": 1
+      },
+      "createdAt": "2026-09-24T11:19:44.049Z"
+    }
+  },
+  "vanguard": {
+    "username": "vanguard",
+    "passwordHash": "f7e5540a355b6b65b263c5b0637e2acf57b367ca3a539a700b726f50d81d1adc",
+    "token": "cov_tok_aaa479eb6768443c7878ac92866d7dce",
+    "profile": {
+      "username": "Vanguard",
+      "displayName": "Vanguard",
+      "level": 1,
+      "xp": 0,
+      "gold": 250,
+      "shards": 400,
+      "unlockedAuras": [],
+      "cosmeticAura": null,
+      "title": "Covenant Initiate",
+      "mightRank": 0,
+      "vitalityRank": 0,
+      "hasteRank": 0,
+      "gearScore": 100,
+      "equippedItem": null,
+      "inventory": [],
+      "purchasedBundles": [],
+      "stats": {
+        "kills": 0,
+        "bossesSlain": 0,
+        "floorsCleared": 0,
+        "highestFloor": 1
+      },
+      "createdAt": "2026-09-24T12:23:34.640Z"
+    }
+  }
+}

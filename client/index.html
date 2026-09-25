@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0712">
+  <meta name="description" content="Dungeon of the Covenant — real-time co-op multiplayer ARPG for 2-8 players. Choose your covenant class and descend.">
+  <title>DUNGEON OF THE COVENANT | Real-Time Multiplayer ARPG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=5.0">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "/vendor/three.module.js"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- 3D render target -->
+  <div id="canvas-container"></div>
+
+  <!-- Floating damage numbers (2D pooled canvas overlay) -->
+  <canvas id="damage-numbers-canvas" class="damage-layer" aria-hidden="true"></canvas>
+
+  <!-- ============ LOADING SCREEN ============ -->
+  <div id="loading-screen" class="ui-screen active" role="status" aria-live="polite">
+    <div class="loading-veil"></div>
+    <div class="loading-core">
+      <div id="loading-emblem" class="loading-emblem" aria-hidden="true">⚔</div>
+      <h1 id="loading-title" class="loading-title">DUNGEON OF THE COVENANT</h1>
+      <div class="ornament-divider" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
+      <p class="loading-sub">The Soul-Forge stirs beneath the stone…</p>
+      <div id="loading-bar-track" class="loading-track">
+        <div id="loading-progress-fill" class="loading-fill"></div>
+      </div>
+      <div id="loading-progress-text" class="loading-pct">0%</div>
+      <div class="loading-tip-box">
+        <span id="loading-tip-label" class="loading-tip-label">COVENANT WISDOM</span>
+        <p id="loading-lore-tip" class="loading-tip">Tar Bombs ignite when touched by fire — coat the floor, then burn it.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ NARRATOR BANNER ============ -->
+  <div id="narrator-banner" class="hidden">
+    <div class="narrator-ornament left" aria-hidden="true"></div>
+    <div class="narrator-content">
+      <div>
+        <span class="narrator-title">THE DUNGEON SPEAKS</span>
+        <p id="narrator-text">The ancient crypt awakens...</p>
+      </div>
+      <button id="btn-close-narrator" title="Dismiss Banner" aria-label="Dismiss narration banner">✖</button>
+    </div>
+    <div class="narrator-ornament right" aria-hidden="true"></div>
+  </div>
+
+  <!-- ============ SCREEN OVERLAYS ============ -->
+  <div id="last-stand-overlay" class="screen-overlay hidden">
+    <div class="last-stand-badge">LAST STAND ACTIVE</div>
+  </div>
+  <div id="war-horn-overlay" class="screen-overlay hidden">
+    <div class="war-horn-badge">WAR HORN: TIME FROZEN</div>
+    <div class="war-horn-timer" id="war-horn-timer-text">10.0s</div>
+  </div>
+
+  <!-- ============ MAIN MENU ============ -->
+  <div id="lobby-screen" class="ui-screen hidden">
+    <div class="lobby-backdrop" aria-hidden="true"></div>
+    <div class="lobby-container">
+      <header class="game-header">
+        <div class="cover-frame">
+          <img src="assets/cover_art.jpg" alt="Dungeon of the Covenant official cover art" />
+        </div>
+        <h1 class="game-title">DUNGEON OF THE COVENANT</h1>
+        <p class="game-subtitle">Real-Time Co-Op ARPG &bull; 2-8 Players</p>
+        <div class="ornament-divider" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
+        <div id="connection-status-badge" class="connection-badge"><span class="status-dot"></span> <span id="status-text">Connecting to Server...</span></div>
+      </header>
+
+      <nav id="lobby-tabs" class="lobby-tabs" aria-label="Main menu">
+        <button id="lobby-tab-play" class="lobby-tab active" data-panel="lobby-panel-play">⚔️ PLAY</button>
+        <button id="lobby-tab-chamber" class="lobby-tab" data-panel="lobby-panel-chamber">🏰 CHAMBER</button>
+        <button id="lobby-tab-settings" class="lobby-tab" data-panel="lobby-panel-settings">⚙️ CODEX</button>
+      </nav>
+
+      <!-- PLAY PANEL: account + character select -->
+      <section id="lobby-panel-play" class="lobby-panel active character-select-section" aria-label="Character select">
+        <div id="auth-account-bar" class="account-bar">
+          <div class="account-bar-head">
+            <span class="account-bar-title">🛡️ COVENANT ACCOUNT &amp; CLOUD SAVE</span>
+            <span id="auth-status-badge" class="account-bar-status">⚡ Guest Session (Login to sync stats &amp; IAP gear)</span>
+          </div>
+          <div class="account-bar-row">
+            <input type="text" id="player-name-input" maxlength="16" placeholder="Username / Hero Name" value="Vanguard" autocomplete="username">
+            <input type="password" id="player-password-input" maxlength="24" placeholder="Password (4+ chars)" value="covenant" autocomplete="current-password">
+            <button id="btn-auth-login" class="btn btn-secondary">🔐 LOGIN / REGISTER</button>
+          </div>
+          <div id="auth-account-summary" class="account-bar-summary">
+            <span>⚔️ Gear Score: <strong id="lobby-gear-score">100</strong></span>
+            <span>🏆 Weapon: <strong id="lobby-equipped-weapon">Covenant Initiate Arms</strong></span>
+            <span>💎 Shards: <strong id="lobby-shard-balance">350</strong></span>
+          </div>
+        </div>
+
+        <h3 class="section-title">CHOOSE YOUR COVENANT CLASS</h3>
+        <div class="class-grid" id="class-grid" role="radiogroup" aria-label="Covenant classes">
+          <!-- Populated by JS: Juggernaut, Cleric, Rogue, Mage, Ranger, Necromancer -->
+        </div>
+
+        <div class="class-preview-card" id="class-preview-card">
+          <div class="preview-header">
+            <h2 id="preview-class-name">Juggernaut</h2>
+            <span class="role-badge" id="preview-class-role">Tank</span>
+          </div>
+          <p id="preview-class-desc">Armored titan with crowd control and explosive shatter combos.</p>
+          <div class="abilities-preview" id="preview-abilities">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+
+        <div class="room-buttons play-actions">
+          <button id="btn-quickplay-match" class="btn btn-primary btn-large pulse glow">
+            ⚔️ PLAY NOW — FIND MATCH
+          </button>
+          <button id="btn-quickplay" class="hidden" aria-hidden="true" tabindex="-1">quickplay</button>
+          <button id="btn-lobby-emporium" class="btn btn-secondary">
+            💎 COVENANT EMPORIUM &amp; STRIPE ARMORY
+          </button>
+          <a href="/promo.html" target="_blank" rel="noopener" class="btn btn-secondary promo-link">
+            🎬 WATCH OFFICIAL AAA PROMO TRAILER
+          </a>
+        </div>
+      </section>
+
+      <!-- CHAMBER PANEL: private party codes -->
+      <section id="lobby-panel-chamber" class="lobby-panel hidden" aria-label="Private chamber">
+        <div class="chamber-card">
+          <h3 class="section-title">PRIVATE PARTY CHAMBER</h3>
+          <p class="chamber-blurb">Gather your covenant in a private dungeon. Create a chamber and share its 4-letter code, or enter a code to join a friend's run.</p>
+          <button id="btn-create-room" class="btn btn-primary btn-large">🏰 CREATE PRIVATE CHAMBER</button>
+          <div class="ornament-divider slim" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
+          <div class="join-room-box">
+            <input type="text" id="room-code-input" maxlength="4" placeholder="4-LETTER CODE" autocomplete="off" autocapitalize="characters" aria-label="Chamber code">
+            <button id="btn-join-room" class="btn btn-secondary">JOIN CHAMBER</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- CODEX PANEL: settings + how to play -->
+      <section id="lobby-panel-settings" class="lobby-panel hidden" aria-label="Settings and guide">
+        <div class="codex-card">
+          <h3 class="section-title">COVENANT CODEX</h3>
+          <button id="btn-menu-open-settings" class="btn btn-primary">⚙️ OPEN FULL SETTINGS</button>
+          <h4 class="codex-h">HOW TO PLAY</h4>
+          <ul class="howto-list">
+            <li><strong>WASD / Arrows</strong> — move &nbsp;•&nbsp; <strong>Mouse</strong> — aim</li>
+            <li><strong>Click / Tap ⚔️</strong> — basic attack &nbsp;•&nbsp; <strong>1 / 2 / 3</strong> — abilities</li>
+            <li><strong>Space</strong> — jump &nbsp;•&nbsp; <strong>Shift</strong> — dash (invulnerable)</li>
+            <li><strong>Q / E</strong> — rotate camera &nbsp;•&nbsp; <strong>N</strong> — next floor</li>
+            <li><strong>H</strong> — clean HUD &nbsp;•&nbsp; <strong>M</strong> — mute &nbsp;•&nbsp; <strong>Esc</strong> — close panels</li>
+            <li>🤖 AI companion bots fill empty party slots automatically.</li>
+            <li>🔥 Coat the floor in <strong>Tar Bombs</strong>, then ignite it with fire for massive combo damage.</li>
+            <li>🎯 Slay the <strong>West &amp; East Wing Wardens</strong> to shatter Malakor's Soul-Seals.</li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ============ ROOM LOBBY ============ -->
+  <div id="room-lobby-screen" class="ui-screen hidden">
+    <div class="lobby-container">
+      <header class="room-header">
+        <span class="room-code-label">CHAMBER CODE</span>
+        <h2 id="display-room-code" class="display-code">----</h2>
+        <p class="invite-hint">Share this chamber code — allies enter it on the main menu's Chamber tab to join your party.</p>
+      </header>
+
+      <div class="party-members-list" id="lobby-party-list">
+        <!-- List of players in chamber -->
+      </div>
+
+      <div class="bot-notice">
+        <span class="bot-icon">🤖</span> AI Companion Bots will automatically fill empty slots so you can play right away!
+      </div>
+
+      <div class="lobby-actions">
+        <button id="btn-start-game" class="btn btn-primary btn-large glow">DESCEND INTO THE CRYPT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ IN-GAME HUD ============ -->
+  <div id="game-hud" class="hidden">
+    <div class="hud-top-bar">
+      <div id="party-hud-wrapper">
+        <button id="btn-min-party" title="Minimize / Expand Party Frames">👥 PARTY [−]</button>
+        <div class="party-status-container" id="party-hud-list">
+          <!-- Rendered by JS -->
+        </div>
+      </div>
+
+      <div id="boss-hud-bar" class="boss-hud hidden">
+        <button id="btn-min-boss" class="boss-min-btn" title="Minimize Boss Bar">−</button>
+        <div class="boss-info">
+          <span id="boss-name" class="boss-name">Malakor, Soul-Forge Warden</span>
+          <span id="boss-phase-tag" class="phase-tag">PHASE 1</span>
+        </div>
+        <div class="boss-hp-track" id="boss-hp-track-container">
+          <div id="boss-hp-fill" class="boss-hp-fill"></div>
+          <span id="boss-hp-text" class="boss-hp-text">100%</span>
+        </div>
+      </div>
+
+      <button id="btn-war-horn" class="war-horn-btn" title="War Horn (Freeze Time for 10s)">
+        <div class="horn-icon">📯</div>
+        <span class="horn-label">WAR HORN</span>
+      </button>
+
+      <div class="hud-top-actions">
+        <div id="hero-status-pill">
+          <span id="hud-hero-level">LVL 1</span>
+          <div class="xp-track" title="Hero XP">
+            <div id="hud-xp-fill"></div>
+          </div>
+          <span id="hud-hero-gold" class="gold-text">💰 60g</span>
+          <span id="hud-hero-shards" class="shard-text">💎 300</span>
+        </div>
+
+        <button id="btn-clean-hud" class="secret-tab-btn" title="Minimize / Restore All HUD Panels (Shortcut: H)">
+          <span class="secret-icon">👁️</span>
+          <span class="secret-label">UI [H]</span>
+        </button>
+        <button id="btn-hud-emporium" class="secret-tab-btn" title="Open Covenant Emporium & 3D Cosmetics">
+          <span class="secret-icon">💎</span>
+          <span class="secret-label">SHOP</span>
+        </button>
+        <button id="btn-forge-toggle" class="secret-tab-btn" title="Open Covenant Forge & Relics">
+          <span class="secret-icon">⚒️</span>
+          <span class="secret-label">FORGE</span>
+        </button>
+        <button id="btn-secret-toggle" class="secret-tab-btn" title="Toggle Secret Objective">
+          <span class="secret-icon">📜</span>
+          <span class="secret-label">SECRET</span>
+        </button>
+        <button id="btn-audio-toggle" class="secret-tab-btn" title="Toggle Studio Orchestral Music & SFX [M]">
+          <span class="secret-icon">🔊</span>
+          <span id="audio-toggle-label" class="secret-label">AUDIO ON</span>
+        </button>
+        <button id="btn-pause-open" class="secret-tab-btn" title="Pause Menu">
+          <span class="secret-icon">⏸️</span>
+          <span class="secret-label">MENU</span>
+        </button>
+
+        <div id="gamepad-hud-badge" title="Gamepad / Controller Support Ready (Connect any Xbox/PS/USB Controller)">
+          <span>🎮</span>
+          <span id="gamepad-status-text">PAD READY</span>
+        </div>
+
+        <button id="btn-hud-lobby" class="secret-tab-btn" title="Return to Chamber Lobby">
+          <span class="secret-icon">🏠</span>
+          <span class="secret-label">EXIT</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Kill feed -->
+    <div id="kill-feed" class="kill-feed" aria-live="polite" aria-label="Kill feed"></div>
+
+    <!-- Quest banner -->
+    <div id="hud-quest-banner">
+      <span>🎯</span>
+      <span id="hud-quest-text">QUEST: Slay West &amp; East Wing Wardens to Shatter Malakor's Soul-Seals (0/2)</span>
+      <button id="btn-min-quest" title="Minimize / Hide Quest Banner">−</button>
+    </div>
+
+    <!-- Forge drawer -->
+    <div id="forge-panel" class="secret-card hidden">
+      <div class="secret-card-inner">
+        <button id="btn-close-forge-x" class="card-x" title="Close Forge">✖</button>
+        <span class="secret-stamp gold">⚒️ COVENANT SOUL-FORGE</span>
+        <h3>Temper Gear &amp; Relics</h3>
+        <p class="card-blurb">Spend dungeon Gold to empower your hero mid-run.</p>
+        <div class="forge-options">
+          <button id="btn-forge-weapon" class="btn-sm forge-btn forge-weapon">
+            <span>⚔️ Temper Weapon (+25% DMG)</span>
+            <span id="forge-weapon-cost">80g</span>
+          </button>
+          <button id="btn-forge-armor" class="btn-sm forge-btn forge-armor">
+            <span>🛡️ Temper Armor (+180 Max HP)</span>
+            <span id="forge-armor-cost">80g</span>
+          </button>
+          <button id="btn-forge-elixir" class="btn-sm forge-btn forge-elixir">
+            <span>🧪 Covenant Surge (Party Heal + CDs)</span>
+            <span>60g</span>
+          </button>
+        </div>
+        <div id="hud-relics-summary">
+          <div><strong>Equipped Relics:</strong> None yet (Slay Wing Mini-Bosses)</div>
+        </div>
+        <button id="btn-close-forge" class="btn-sm">Close Forge</button>
+      </div>
+    </div>
+
+    <!-- Secret objective card -->
+    <div id="secret-card-panel" class="secret-card hidden">
+      <div class="secret-card-inner">
+        <button id="btn-close-secret-x" class="card-x" title="Close Secret Goal">✖</button>
+        <span class="secret-stamp">CONFIDENTIAL COVENANT GOAL</span>
+        <h3 id="secret-title">The Covetous</h3>
+        <p id="secret-desc">Finish the run with at least 50% of all gold drops.</p>
+        <div class="secret-reward">Reward: +5,000 Renown &bull; Title: "The Greedy"</div>
+        <button id="btn-close-secret" class="btn-sm">Hide Goal</button>
+      </div>
+    </div>
+
+    <!-- Minimap + camera + floor stack -->
+    <div id="right-hud-stack" class="minimap-camera-panel">
+      <div class="right-stack-head">
+        <button id="btn-generate-floor" title="Generate New Random Procedural Dungeon Floor (Key: N)">🎲 NEXT FLOOR [N]</button>
+        <button id="btn-min-right-stack" title="Minimize / Expand Map & Floor Info">🗺️ MAP [−]</button>
+      </div>
+
+      <div id="right-hud-body">
+        <div class="minimap-frame">
+          <canvas id="dungeon-minimap" width="132" height="132"></canvas>
+          <div id="minimap-zone-label">COVENANT ATRIUM</div>
+        </div>
+        <div class="cam-controls">
+          <button id="btn-cam-zoom-out" title="Zoom Camera Out (-)">🔍−</button>
+          <button id="btn-cam-zoom-in" title="Zoom Camera In (+)">🔍+</button>
+          <button id="btn-cam-rot-left" title="Rotate Camera Left (Q)">↺</button>
+          <button id="btn-cam-rot-right" title="Rotate Camera Right (E)">↻</button>
+          <button id="btn-cam-overview" title="Toggle Far Overview">🗺️ FAR</button>
+        </div>
+
+        <div id="procedural-floor-panel">
+          <div class="proc-head">
+            <span id="proc-floor-title">FLOOR 1</span>
+            <button id="btn-min-proc-floor" title="Minimize / Expand Floor Info">−</button>
+          </div>
+          <div id="proc-floor-details">
+            <div id="proc-biome-name">Sunken Ossuary</div>
+            <div id="proc-hex-anomaly">⚡ Dimensional Echoes</div>
+            <div id="proc-hex-desc"></div>
+            <div id="proc-seed-val">SEED: 101</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Player vitals + buffs (bottom-left) -->
+    <div id="player-vitals" class="player-vitals">
+      <div id="buff-bar" class="buff-bar" aria-label="Active buffs and debuffs"></div>
+      <div class="vitals-hp">
+        <div id="vitals-hp-track" class="hp-track">
+          <div id="player-hp-fill" class="hp-fill"></div>
+        </div>
+        <span id="player-hp-text" class="vitals-text">100 / 100</span>
+      </div>
+      <div class="vitals-mana">
+        <div id="vitals-mana-track" class="mana-track">
+          <div id="player-mana-fill" class="mana-fill"></div>
+        </div>
+        <span id="player-mana-text" class="vitals-text">100 / 100</span>
+      </div>
+    </div>
+
+    <!-- Event toasts -->
+    <div id="event-toasts" class="event-toasts" aria-live="polite" aria-label="Event notifications"></div>
+
+    <!-- Tactical command bar -->
+    <div id="tactical-command-bar">
+      <button id="btn-min-tactical" title="Minimize / Expand Tactical Bar">⚔️ [−]</button>
+      <div id="tactical-buttons-group">
+        <button id="btn-tac-attack" class="btn-sm tac-btn tac-attack">⚔️ Attack</button>
+        <button id="btn-tac-regroup" class="btn-sm tac-btn tac-regroup">🛡️ Regroup</button>
+        <button id="btn-tac-loot" class="btn-sm tac-btn tac-loot">🧲 Loot</button>
+        <button id="btn-tac-heal" class="btn-sm tac-btn tac-heal">✨ Heal</button>
+        <span class="tac-divider" aria-hidden="true"></span>
+        <button id="btn-tac-spikes" class="btn-sm tac-btn tac-spikes">🦴 Spikes</button>
+        <button id="btn-tac-drain" class="btn-sm tac-btn tac-drain">🔮 Drain</button>
+        <button id="btn-tac-explosion" class="btn-sm tac-btn tac-explosion">💀 Explode</button>
+      </div>
+    </div>
+
+    <!-- Ping wheel -->
+    <div id="ping-wheel" class="ping-wheel-overlay hidden">
+      <button class="ping-btn ping-attack" data-ping="attack">⚔️ Attack</button>
+      <button class="ping-btn ping-regroup" data-ping="regroup">🛡️ Regroup</button>
+      <button class="ping-btn ping-loot" data-ping="loot">💎 Loot</button>
+      <button class="ping-btn ping-help" data-ping="help">🆘 Help</button>
+    </div>
+
+    <!-- Mobile joystick -->
+    <div id="joystick-zone" class="joystick-zone">
+      <div id="joystick-base" class="joystick-base hidden">
+        <div id="joystick-knob" class="joystick-knob"></div>
+      </div>
+    </div>
+
+    <!-- Mobile ability arc -->
+    <div class="abilities-zone">
+      <button id="btn-open-ping" class="action-btn ping-trigger-btn" title="Party Ping">📍</button>
+
+      <button id="btn-jump" class="action-btn skill-btn jump-btn" data-skill="jump" title="Jump Over Ledges & Pull Nearby Loot (Spacebar / Gamepad A)">
+        <div class="skill-icon">🦘</div>
+        <div class="skill-cooldown-overlay" id="jump-cd"></div>
+        <span class="skill-label">JUMP</span>
+      </button>
+
+      <button id="btn-dash" class="action-btn skill-btn dash-btn" data-skill="dash" title="Tactical Dodge Dash (Shift / Gamepad B - Invulnerable i-frames)">
+        <div class="skill-icon">💨</div>
+        <div class="skill-cooldown-overlay" id="dash-cd"></div>
+        <span class="skill-label">DASH</span>
+      </button>
+
+      <button id="btn-skill-1" class="action-btn skill-btn" data-skill="1" title="Ability 1">
+        <div class="skill-icon" id="skill-1-icon">💥</div>
+        <div class="skill-cooldown-overlay" id="skill-1-cd"></div>
+        <span class="skill-label" id="skill-1-label">S1</span>
+      </button>
+
+      <button id="btn-skill-2" class="action-btn skill-btn" data-skill="2" title="Ability 2">
+        <div class="skill-icon" id="skill-2-icon">🛡️</div>
+        <div class="skill-cooldown-overlay" id="skill-2-cd"></div>
+        <span class="skill-label" id="skill-2-label">S2</span>
+      </button>
+
+      <button id="btn-skill-3" class="action-btn skill-btn ultimate" data-skill="3" title="Ultimate Ability">
+        <div class="skill-icon" id="skill-3-icon">⚡</div>
+        <div class="skill-cooldown-overlay" id="skill-3-cd"></div>
+        <span class="skill-label" id="skill-3-label">S3</span>
+      </button>
+
+      <button id="btn-attack" class="action-btn attack-btn" data-skill="attack" title="Basic Attack">
+        <div class="attack-icon">⚔️</div>
+      </button>
+    </div>
+  </div>
+
+  <!-- ============ NEED / GREED ============ -->
+  <div id="need-greed-modal" class="modal-overlay hidden">
+    <div class="need-greed-card">
+      <button id="btn-close-need-greed" class="card-x" title="Close Loot Roll (Esc)">✖</button>
+      <div class="loot-glow" aria-hidden="true"></div>
+      <span class="loot-rarity-badge">LEGENDARY DROP</span>
+      <h2 id="loot-item-name" class="loot-item-name">Malakor's Molten Great-Relic</h2>
+      <p class="loot-timer">Roll expires in <span id="roll-countdown">10</span>s</p>
+
+      <div class="need-greed-buttons">
+        <button id="btn-roll-need" class="btn roll-btn need">
+          <span class="roll-icon">🔥</span> NEED
+        </button>
+        <button id="btn-roll-greed" class="btn roll-btn greed">
+          <span class="roll-icon">💰</span> GREED
+        </button>
+        <button id="btn-roll-pass" class="btn roll-btn pass">
+          <span class="roll-icon">✖️</span> PASS
+        </button>
+      </div>
+
+      <div class="roll-results-stream" id="roll-results-stream">
+        <!-- Live dice rolls from party members -->
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VICTORY PODIUM ============ -->
+  <div id="victory-screen" class="ui-screen hidden">
+    <div class="victory-container">
+      <header class="podium-header">
+        <h1 id="run-result-title" class="victory-title">CHAMBER CONQUERED!</h1>
+        <p class="victory-subtitle">The Soul-Forge falls silent. The covenant prevails.</p>
+        <div class="ornament-divider" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
+        <div class="total-score-badge">
+          <span>PARTY SCORE</span>
+          <h2 id="final-party-score">58,450</h2>
+        </div>
+      </header>
+
+      <section class="potg-section">
+        <span class="potg-badge">PLAY OF THE GAME</span>
+        <h3 id="potg-hero-name" class="potg-hero">Hero</h3>
+        <h4 id="potg-title" class="potg-title">Clutch Revive under Last Stand</h4>
+        <p id="potg-desc" class="potg-desc">Turned the tide of battle with a single heroic breath.</p>
+      </section>
+
+      <section class="party-stats-section">
+        <h3>HERO TRIAL RESULTS</h3>
+        <div class="stats-table-container">
+          <table class="stats-table">
+            <thead>
+              <tr>
+                <th>Hero</th>
+                <th>Role</th>
+                <th>Damage</th>
+                <th>Gold</th>
+                <th>Secret Goal</th>
+              </tr>
+            </thead>
+            <tbody id="podium-stats-body">
+              <!-- Populated by JS -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div class="victory-actions">
+        <button id="btn-play-again" class="btn btn-primary btn-large">RETURN TO LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PAUSE MENU ============ -->
+  <div id="pause-screen" class="ui-screen hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+    <div class="pause-card">
+      <h2 id="pause-title" class="pause-title">PAUSED</h2>
+      <div class="ornament-divider slim" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
+      <p id="pause-subtitle" class="pause-sub">The dungeon holds its breath… (allies fight on)</p>
+      <div class="pause-actions">
+        <button id="btn-resume" class="btn btn-primary btn-large">▶ RESUME</button>
+        <button id="btn-pause-settings" class="btn btn-secondary">⚙️ SETTINGS</button>
+        <button id="btn-pause-quit" class="btn btn-secondary danger">🏠 QUIT TO LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DEATH SCREEN ============ -->
+  <div id="death-screen" class="ui-screen hidden" role="dialog" aria-modal="true" aria-labelledby="death-title">
+    <div class="death-card">
+      <div id="death-skull" class="death-skull" aria-hidden="true">💀</div>
+      <h2 id="death-title" class="death-title">YOU HAVE FALLEN</h2>
+      <div class="ornament-divider slim blood" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
+      <p id="death-subtitle" class="death-sub">The covenant fights on without you… for now.</p>
+      <div id="death-stats" class="death-stats"></div>
+      <div class="death-actions">
+        <button id="btn-respawn" class="btn btn-primary btn-large glow">⚔️ RESPAWN AT SOUL-SEAL</button>
+        <button id="btn-death-lobby" class="btn btn-secondary">🏠 RETURN TO LOBBY</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ EMPORIUM ============ -->
+  <div id="emporium-modal" class="modal-overlay hidden">
+    <div class="need-greed-card emporium-card">
+      <div class="emporium-head">
+        <div>
+          <span class="loot-rarity-badge sovereign">SEASON 1 • SOVEREIGN COVENANT</span>
+          <h2>💎 COVENANT EMPORIUM &amp; SOUL-TREE</h2>
+        </div>
+        <div class="emporium-wallet">
+          <div class="wallet-line">Wallet: <span id="emporium-shard-balance">300</span> 💎</div>
+          <button id="btn-close-emporium" class="btn-sm">✖ Close</button>
+        </div>
+      </div>
+
+      <h3 class="emporium-h">👑 3D MYTHIC HERO AURAS (VISIBLE TO ALL PARTY MEMBERS)</h3>
+      <div class="emporium-grid">
+        <div class="aura-card aura-infernal">
+          <div class="aura-icon">🔥</div>
+          <div class="aura-name">Infernal Crown</div>
+          <div class="aura-desc">Orbiting Hellfire Gems &amp; Flame Halo</div>
+          <button class="btn-sm btn-cosmetic-buy" data-aura="infernal" data-cost="200" data-name="Infernal Demon-Crown" data-title="Hellfire Warlord">Unlock / Equip (200 💎)</button>
+        </div>
+        <div class="aura-card aura-void">
+          <div class="aura-icon">🌌</div>
+          <div class="aura-name">Astral Void-Star</div>
+          <div class="aura-desc">Singularity Rings &amp; Cyan Crystals</div>
+          <button class="btn-sm btn-cosmetic-buy" data-aura="void" data-cost="250" data-name="Astral Void-Star" data-title="Void-Walker">Unlock / Equip (250 💎)</button>
+        </div>
+        <div class="aura-card aura-necro">
+          <div class="aura-icon">☠️</div>
+          <div class="aura-name">Plague-Wraith</div>
+          <div class="aura-desc">Emerald Necro-Ring &amp; Soul Wisps</div>
+          <button class="btn-sm btn-cosmetic-buy" data-aura="necro" data-cost="300" data-name="Plague-Wraith Shroud" data-title="Lich-Bane">Unlock / Equip (300 💎)</button>
+        </div>
+        <div class="aura-card aura-sovereign">
+          <div class="aura-icon">👑</div>
+          <div class="aura-name">Sovereign Seraph</div>
+          <div class="aura-desc">3D Golden Wings &amp; Sovereign Crown</div>
+          <button class="btn-sm btn-cosmetic-buy" data-aura="sovereign" data-cost="450" data-name="Sovereign Seraph Wings" data-title="Sovereign Ascendant">Unlock / Equip (450 💎)</button>
+        </div>
+      </div>
+
+      <h3 class="emporium-h violet">🌳 PERMANENT ACCOUNT SOUL-TREE (PERSISTS ACROSS ALL RUNS)</h3>
+      <div class="blessing-grid">
+        <button class="btn-sm btn-blessing-buy blessing-might" data-blessing="might" data-cost="100">
+          <div class="blessing-name">⚔️ Soul of Might (<span id="rank-might">Rank 0</span>)</div>
+          <div class="blessing-desc">+12% Permanent Base DMG • <strong>100 💎</strong></div>
+        </button>
+        <button class="btn-sm btn-blessing-buy blessing-vitality" data-blessing="vitality" data-cost="100">
+          <div class="blessing-name">🛡️ Soul of Vitality (<span id="rank-vitality">Rank 0</span>)</div>
+          <div class="blessing-desc">+150 Permanent Base HP • <strong>100 💎</strong></div>
+        </button>
+        <button class="btn-sm btn-blessing-buy blessing-haste" data-blessing="haste" data-cost="100">
+          <div class="blessing-name">⚡ Soul of Chronos (<span id="rank-haste">Rank 0</span>)</div>
+          <div class="blessing-desc">+10% Cooldown Haste • <strong>100 💎</strong></div>
+        </button>
+      </div>
+
+      <div class="emporium-stripe-head">
+        <h3 class="emporium-h green">💳 STRIPE LIVE ARMORY &amp; TREASURY BUNDLES</h3>
+        <span id="stripe-mode-badge">🔒 STRIPE .ENV CONNECTED</span>
+      </div>
+
+      <div class="iap-grid">
+        <div class="iap-card iap-starter">
+          <div>
+            <div class="iap-name">🔥 Vanguard Starter Pack</div>
+            <div class="iap-desc">• +500 Soul Shards (💎) + 3D Infernal Crown</div>
+            <div class="iap-gear">• Equips: Hellfire Great-Blade (GS 680: +45 ATK, +180 HP, +15% CRIT)</div>
+          </div>
+          <button id="btn-iap-starter" class="btn-sm iap-btn">Purchase &amp; Equip — $2.99</button>
+        </div>
+        <div class="iap-card iap-founder">
+          <div>
+            <div class="iap-name">👑 Founder's Sovereign Pass</div>
+            <div class="iap-desc">• +1,500 Shards + 3D Seraph Wings + All Blessings +1</div>
+            <div class="iap-gear">• Equips: Sovereign Relic-Blade (GS 1150: +85 ATK, +350 HP, +25% CRIT)</div>
+          </div>
+          <button id="btn-iap-founder" class="btn-sm iap-btn">Purchase &amp; Equip — $6.99</button>
+        </div>
+        <div class="iap-card iap-mythic">
+          <div>
+            <div class="iap-name">⚔️ Mythic 3D Arsenal Bundle</div>
+            <div class="iap-desc">• +3,500 Shards + All 4 3D Auras + All Blessings +2</div>
+            <div class="iap-gear">• Equips: Malakor's Godslayer Scythe (GS 1650: +140 ATK, +600 HP, +35% CRIT)</div>
+          </div>
+          <button id="btn-iap-mythic-bundle" class="btn-sm iap-btn">Purchase &amp; Equip — $9.99</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audio unlock prompt -->
+  <div id="audio-prompt" class="audio-prompt">
+    <span>🔊 Tap anywhere for sound FX &amp; reactive narration</span>
+  </div>
+
+  <!-- Scripts -->
+  <script type="module" src="js/main.js?v=9.0"></script>
+</body>
+</html>

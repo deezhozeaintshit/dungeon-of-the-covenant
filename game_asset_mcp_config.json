@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "game-asset-mcp": {
+      "url": "https://sse.videogamemcp.com/sse",
+      "enabled": true
+    }
+  }
+}

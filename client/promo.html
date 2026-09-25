@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dungeon of the Covenant — Official AAA Promo Trailer</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;800;900&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #06040b;
+      color: #f4e6c6;
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      overflow-x: hidden;
+    }
+    .trailer-shell {
+      max-width: 1120px;
+      width: 100%;
+      background: radial-gradient(circle at top, #1d1033 0%, #090612 100%);
+      border: 2px solid #d4af37;
+      border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.9), 0 0 40px rgba(212, 175, 55, 0.2);
+      padding: 18px;
+    }
+    .trailer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .trailer-title {
+      font-family: 'Cinzel', serif;
+      font-size: 22px;
+      font-weight: 900;
+      color: #ffd700;
+      letter-spacing: 1px;
+    }
+    .trailer-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      background: linear-gradient(135deg, #d97706, #ffd700);
+      color: #110b1c;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 18px;
+      font-weight: 900;
+      font-family: 'Cinzel', serif;
+      cursor: pointer;
+      font-size: 13px;
+      transition: transform 0.15s, box-shadow 0.15s;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
+    }
+    .btn-secondary {
+      background: #28193d;
+      color: #e0aaff;
+      border: 1.5px solid #9d4edd;
+    }
+    .viewport-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      background: #000;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid rgba(212, 175, 55, 0.45);
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 6px;
+      background: #1a1228;
+      border-radius: 3px;
+      margin-top: 12px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #9d4edd, #ffd700, #ff4500);
+      transition: width 0.1s linear;
+    }
+    .act-pills {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .act-pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .act-pill.active {
+      background: rgba(212, 175, 55, 0.16);
+      border-color: #ffd700;
+    }
+    .act-pill h4 {
+      font-family: 'Cinzel', serif;
+      color: #ffd700;
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .act-pill p {
+      font-size: 11px;
+      color: #cbb89d;
+    }
+  </style>
+</head>
+<body>
+  <div class="trailer-shell">
+    <div class="trailer-header">
+      <div>
+        <div class="trailer-title">🎬 DUNGEON OF THE COVENANT — OFFICIAL AAA PROMO TRAILER</div>
+        <div style="font-size:12px; color:#cbb89d;">Real-Time 60FPS Canvas Trailer with Procedural Orchestral Audio, Voiceover &amp; Video Export</div>
+      </div>
+      <div class="trailer-controls">
+        <button id="btn-play-trailer" class="btn">▶️ PLAY TRAILER WITH SOUND</button>
+        <button id="btn-export-video" class="btn btn-secondary">💾 RECORD &amp; DOWNLOAD VIDEO (.WEBM)</button>
+        <a href="/" class="btn btn-secondary">⚔️ PLAY GAME NOW</a>
+      </div>
+    </div>
+
+    <div class="viewport-wrap">
+      <canvas id="trailer-canvas" width="1280" height="720"></canvas>
+    </div>
+
+    <div class="progress-bar">
+      <div id="trailer-progress" class="progress-fill"></div>
+    </div>
+
+    <div class="act-pills" id="act-pills">
+      <div class="act-pill active" data-act="0">
+        <h4>ACT I: THE COVENANT CALLS</h4>
+        <p>2–8 Player Instant Room-Code Co-Op across Mobile &amp; PC</p>
+      </div>
+      <div class="act-pill" data-act="1">
+        <h4>ACT II: ELEMENTAL COMBOS</h4>
+        <p>6 Classes, 1.75x Crits, Dash i-Frames &amp; Soul Overdrive</p>
+      </div>
+      <div class="act-pill" data-act="2">
+        <h4>ACT III: THE 7-ZONE CITADEL</h4>
+        <p>Shatter Twin Wing Soul-Seals &amp; Equip 3D Seraph Wings</p>
+      </div>
+      <div class="act-pill" data-act="3">
+        <h4>ACT IV: SLAY THE WARDEN</h4>
+        <p>War Horn Time-Freeze, Slow-Mo Kill Cam &amp; Need/Greed Loot</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('trailer-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Load the generated AAA Key Art & Gameplay Scenes
+    const images = {
+      cover: new Image(),
+      combos: new Image(),
+      boss: new Image()
+    };
+    images.cover.src = 'assets/cover_art.jpg';
+    images.combos.src = 'assets/promo_combos.jpg';
+    images.boss.src = 'assets/promo_boss.jpg';
+
+    const ACTS = [
+      {
+        duration: 6.5,
+        imgKey: 'cover',
+        tag: 'REAL-TIME MULTIPLAYER CO-OP ACTION RPG',
+        headline: 'DUNGEON OF THE COVENANT',
+        subline: 'Join Instantly with 4-Letter Chamber Codes • 2–8 Players • Mobile & PC Cross-Play',
+        voice: 'Descend into the Dungeon of the Covenant. Gather up to eight heroes instantly with a four-letter chamber code.',
+        zoomStart: 1.02, zoomEnd: 1.14, panX: 0, panY: -15,
+        accent: '#ffd700'
+      },
+      {
+        duration: 6.5,
+        imgKey: 'combos',
+        tag: '6 HERO CLASSES & SYNERGY REACTIONS',
+        headline: 'UNLEASH DEVASTATING ELEMENTAL COMBOS',
+        subline: 'Ignite Tar Slicks • Shatter Frozen Hordes • Dodge Traps with Invulnerable Dash i-Frames',
+        voice: 'Master six distinct classes. Ignite tar slicks into raging infernos, shatter frozen legions, and trigger blazing Soul Overdrive.',
+        zoomStart: 1.12, zoomEnd: 1.02, panX: -20, panY: 10,
+        accent: '#ff5500'
+      },
+      {
+        duration: 6.5,
+        imgKey: 'cover',
+        tag: 'THE 7-ZONE CITADEL & COVENANT EMPORIUM',
+        headline: 'SHATTER THE TWIN WING SOUL-SEALS',
+        subline: 'Slay Executioner Vorgath & Arch-Lich Malthor • Unlock 3D Golden Seraph Wings & Soul-Tree Ranks',
+        voice: 'Conquer the West and East Wings to shatter Malakor’s Twin Soul-Seals, forge runic weapons, and ascend with 3D Sovereign Seraph Wings.',
+        zoomStart: 1.18, zoomEnd: 1.05, panX: 25, panY: -10,
+        accent: '#e0aaff'
+      },
+      {
+        duration: 6.5,
+        imgKey: 'boss',
+        tag: 'EPIC BOSS CLIMAX & LEGENDARY RELIC ROLLS',
+        headline: 'SOUND THE WAR HORN • CLAIM THE RELIC',
+        subline: '10s Time-Freeze War Horn • Slow-Mo Boss Kill Cam • Live Need/Greed Dice Rolls',
+        voice: 'Sound the War Horn to freeze time, execute the final blow in cinematic slow-motion, and roll Need or Greed for Legendary Relics. Play now!',
+        zoomStart: 1.03, zoomEnd: 1.16, panX: 0, panY: 15,
+        accent: '#ffd700'
+      }
+    ];
+
+    const TOTAL_DURATION = ACTS.reduce((s, a) => s + a.duration, 0);
+    let elapsed = 0;
+    let isPlaying = true;
+    let lastSpokenAct = -1;
+    let flashAlpha = 0;
+    let audioCtx = null;
+
+    // Ember particles
+    const embers = Array.from({ length: 85 }, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      r: 1.2 + Math.random() * 3.2,
+      vx: -25 + Math.random() * 50,
+      vy: -45 - Math.random() * 85,
+      color: Math.random() > 0.35 ? '#ff7700' : (Math.random() > 0.5 ? '#ffd700' : '#00f5d4'),
+      alpha: 0.3 + Math.random() * 0.7
+    }));
+
+    function playTrailerChord(actIndex) {
+      try {
+        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+
+        const now = audioCtx.currentTime;
+        const freqs = [
+          [65.41, 98.00, 130.81, 196.00], // C minor epic drone
+          [58.27, 87.31, 116.54, 174.61], // Bb power chord
+          [51.91, 77.78, 103.83, 155.56], // Ab dark fantasy swell
+          [73.42, 110.00, 146.83, 220.00] // D climax horn
+        ][actIndex % 4];
+
+        // Sub-bass impact boom
+        const boomOsc = audioCtx.createOscillator();
+        const boomGain = audioCtx.createGain();
+        boomOsc.type = 'sine';
+        boomOsc.frequency.setValueAtTime(110, now);
+        boomOsc.frequency.exponentialRampToValueAtTime(28, now + 0.85);
+        boomGain.gain.setValueAtTime(0.45, now);
+        boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+        boomOsc.connect(boomGain).connect(audioCtx.destination);
+        boomOsc.start(now);
+        boomOsc.stop(now + 0.92);
+
+        // Brass/Pad sustain chord
+        freqs.forEach((f) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(f, now);
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.linearRampToValueAtTime(0.06, now + 0.4);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 5.8);
+          osc.connect(gain).connect(audioCtx.destination);
+          osc.start(now);
+          osc.stop(now + 6.0);
+        });
+      } catch (e) {}
+    }
+
+    function speakVoiceover(text) {
+      try {
+        if ('speechSynthesis' in window) {
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(text);
+          u.pitch = 0.78;
+          u.rate = 0.96;
+          u.volume = 0.95;
+          window.speechSynthesis.speak(u);
+        }
+      } catch (e) {}
+    }
+
+    function restartTrailer(withSound = true) {
+      elapsed = 0;
+      lastSpokenAct = -1;
+      isPlaying = true;
+      if (withSound) {
+        playTrailerChord(0);
+        speakVoiceover(ACTS[0].voice);
+        lastSpokenAct = 0;
+      }
+    }
+
+    document.getElementById('btn-play-trailer').addEventListener('click', () => {
+      restartTrailer(true);
+    });
+
+    document.querySelectorAll('.act-pill').forEach((pill) => {
+      pill.addEventListener('click', () => {
+        const idx = parseInt(pill.getAttribute('data-act'), 10);
+        let t = 0;
+        for (let i = 0; i < idx; i++) t += ACTS[i].duration;
+        elapsed = t + 0.05;
+        lastSpokenAct = idx - 1;
+      });
+    });
+
+    // Record & Download Video (.webm)
+    const exportBtn = document.getElementById('btn-export-video');
+    exportBtn.addEventListener('click', () => {
+      if (!canvas.captureStream || typeof MediaRecorder === 'undefined') {
+        alert('Your browser does not support MediaRecorder canvas export.');
+        return;
+      }
+      restartTrailer(true);
+      exportBtn.innerText = '🔴 RECORDING TRAILER (26s)...';
+      exportBtn.disabled = true;
+
+      const stream = canvas.captureStream(30);
+      const chunks = [];
+      const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+      recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'Dungeon_of_the_Covenant_Promo_Trailer.webm';
+        a.click();
+        exportBtn.innerText = '✅ DOWNLOADED! RECORD AGAIN';
+        exportBtn.disabled = false;
+      };
+      recorder.start();
+      setTimeout(() => {
+        if (recorder.state === 'recording') recorder.stop();
+      }, TOTAL_DURATION * 1000);
+    });
+
+    let lastTime = performance.now();
+    function render(now) {
+      const dt = Math.min(0.1, (now - lastTime) / 1000);
+      lastTime = now;
+
+      if (isPlaying) {
+        elapsed = (elapsed + dt) % TOTAL_DURATION;
+      }
+
+      // Determine current Act
+      let acc = 0;
+      let actIndex = 0;
+      let actElapsed = 0;
+      for (let i = 0; i < ACTS.length; i++) {
+        if (elapsed < acc + ACTS[i].duration) {
+          actIndex = i;
+          actElapsed = elapsed - acc;
+          break;
+        }
+        acc += ACTS[i].duration;
+      }
+
+      if (actIndex !== lastSpokenAct) {
+        lastSpokenAct = actIndex;
+        flashAlpha = 0.75;
+        if (audioCtx) {
+          playTrailerChord(actIndex);
+          speakVoiceover(ACTS[actIndex].voice);
+        }
+        document.querySelectorAll('.act-pill').forEach((p, idx) => {
+          p.classList.toggle('active', idx === actIndex);
+        });
+      }
+
+      const act = ACTS[actIndex];
+      const pct = Math.min(1, actElapsed / act.duration);
+
+      // Update progress bar
+      document.getElementById('trailer-progress').style.width = `${(elapsed / TOTAL_DURATION) * 100}%`;
+
+      // Clear & Draw Ken Burns Keyframe Image
+      ctx.fillStyle = '#07040d';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      const img = images[act.imgKey];
+      if (img && img.complete && img.naturalWidth > 0) {
+        const zoom = act.zoomStart + (act.zoomEnd - act.zoomStart) * pct;
+        const w = canvas.width * zoom;
+        const h = canvas.height * zoom;
+        const x = (canvas.width - w) / 2 + act.panX * pct;
+        const y = (canvas.height - h) / 2 + act.panY * pct;
+        ctx.drawImage(img, x, y, w, h);
+      }
+
+      // Cinematic Dark Vignette & Bottom Gradient
+      const grad = ctx.createLinearGradient(0, canvas.height * 0.35, 0, canvas.height);
+      grad.addColorStop(0, 'rgba(5, 3, 10, 0.05)');
+      grad.addColorStop(0.7, 'rgba(5, 3, 10, 0.75)');
+      grad.addColorStop(1, 'rgba(5, 3, 10, 0.96)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Animate Floating Molten Embers & Soul Sparks
+      for (const e of embers) {
+        e.x += e.vx * dt;
+        e.y += e.vy * dt;
+        if (e.y < -10) {
+          e.y = canvas.height + 10;
+          e.x = Math.random() * canvas.width;
+        }
+        ctx.save();
+        ctx.globalAlpha = e.alpha;
+        ctx.fillStyle = e.color;
+        ctx.shadowColor = e.color;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.arc(e.x, e.y, e.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // Lower-Third AAA Cinema Typography
+      ctx.save();
+      ctx.textAlign = 'center';
+
+      // Pill badge
+      ctx.font = '800 15px Inter, sans-serif';
+      ctx.fillStyle = act.accent;
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 10;
+      ctx.fillText(`◆ ${act.tag} ◆`, canvas.width / 2, canvas.height - 132);
+
+      // Headline
+      ctx.font = '900 44px Cinzel, serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowColor = act.accent;
+      ctx.shadowBlur = 22;
+      ctx.fillText(act.headline, canvas.width / 2, canvas.height - 82);
+
+      // Subline
+      ctx.font = '600 20px Inter, sans-serif';
+      ctx.fillStyle = '#f4e6c6';
+      ctx.shadowColor = '#000';
+      ctx.shadowBlur = 8;
+      ctx.fillText(act.subline, canvas.width / 2, canvas.height - 42);
+      ctx.restore();
+
+      // Transition Flash
+      if (flashAlpha > 0) {
+        ctx.fillStyle = `rgba(255, 220, 150, ${flashAlpha})`;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        flashAlpha = Math.max(0, flashAlpha - dt * 1.8);
+      }
+
+      requestAnimationFrame(render);
+    }
+    requestAnimationFrame(render);
+  </script>
+</body>
+</html>

@@ -1,0 +1,123 @@
+DUNGEON OF THE COVENANT — UI OVERHAUL (2c) INTEGRATION CONTRACT
+=====================================================================
+Track: UI overhaul. Modules live in client/js/ui/. No singletons: every
+module exposes an init function that takes existing game systems as args.
+main.js is the ONLY file that should import these (it owns GameApp).
+
+EXACT IMPORT LINES — paste at the top of client/js/main.js (next to the
+other imports, keep the ?v=9.0 cache-buster pattern):
+
+  import { applyTheme } from './ui/theme.js?v=5.0';
+  import { initMainMenu } from './ui/mainMenu.js?v=5.0';
+  import { initCharacterSelect } from './ui/characterSelect.js?v=5.0';
+  import { initHUD } from './ui/hud.js?v=5.0';
+  import { initScreens } from './ui/screens.js?v=5.0';
+  import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
+
+EXACT INIT CALLS — paste inside GameApp constructor AFTER this.controls
+is created and AFTER initClassSelectionUI() has run (all UI modules are
+null-safe and look up DOM lazily, but the character grid must exist for
+the oath/keyboard enhancements to attach on first pass):
+
+  applyTheme(); // syncs CSS vars; optional overrides: applyTheme({ gold: '#e8c34a' })
+
+  this.ui = {};
+  this.ui.menu = initMainMenu({ game: this });
+  // CLASSES is the module-scope table in main.js — pass it so the
+  // character select stays data-driven:
+  this.ui.characterSelect = initCharacterSelect({ classes: CLASSES });
+  this.ui.hud = initHUD({ game: this });
+  this.ui.screens = initScreens({
+    onOpenSettings: () => this.ui.menu.openSettings(),
+    onRespawn: () => {
+      // TODO(coordinator): wire to the real respawn path, e.g.
+      // this.network.sendInput({ action: 'respawn' });
+    },
+    onQuitToLobby: () => {
+      // TODO(coordinator): reuse the existing lobby-return flow
+      // (same logic as the #btn-hud-lobby handler).
+    },
+  });
+  this.ui.damageNumbers = initDamageNumbers({
+    // TODO(coordinator): supply the camera projection, e.g.
+    // projectToScreen: (w) => this.renderer.worldToScreen(w),
+  });
+
+  // Loading screen lifecycle (real boot flow):
+  this.ui.screens.loading.show();
+  this.ui.screens.loading.startTips();
+  // ... after assets/network ready:
+  // this.ui.screens.loading.setProgress(100, 'Ready');
+  // this.ui.screens.loading.hide();
+  // document.getElementById('lobby-screen').classList.remove('hidden');
+
+  // Damage-number visibility follows the existing QoL toggle
+  // (setting-damagenumbers in the settings panel):
+  // this.ui.damageNumbers.setEnabled(this.qol?.settings?.damageNumbers !== false);
+
+RECOMMENDED PER-FRAME / PER-SNAPSHOT WIRING (inside the existing
+snapshot handler, e.g. next to updatePartyHUD's local-player block):
+
+  const p = /* local player from snapshot */;
+  this.ui.hud.updateVitals({ hp: p.hp, maxHp: p.maxHp, mana: p.mana, maxMana: p.maxMana });
+  // buffs: build from p.buffs / p.debuffs arrays as
+  // [{ icon:'🛡️', name:'Iron Bastion', remaining: 3.2, debuff:false }]:
+  // this.ui.hud.setBuffs(buffList);
+
+  // Combat events -> floating numbers + feed + toasts:
+  // this.ui.damageNumbers.spawn(enemyWorldPos, dmg, 'crit'|'phys'|'magic'|'fire'|'frost'|'poison'|'heal'|'miss'|'dot');
+  // this.ui.hud.pushKillFeed({ killer: 'Vanguard', victim: 'Crypt Husk', boss: false });
+  // this.ui.hud.toast('Wing Warden slain — Soul-Seal shattered (1/2)', 'gold');
+
+  // Death -> death screen (stats from the run summary):
+  // if (p.isDowned && p.hp <= 0 && !this.ui.screens.death.isOpen)
+  //   this.ui.screens.death.show({ damageDealt, kills, goldCollected, floor });
+
+NOTE: lobby-screen now starts with class "hidden"; the loading screen is
+the boot screen. Remove "hidden" from #lobby-screen when boot completes
+(or keep the old behavior by removing "active" from #loading-screen and
+"active" handling in main.js — your call, coordinator).
+
+NEW DOM IDS ADDED TO index.html (all owned by this track; JS hooks kept
+from the old file are unchanged and listed in the id-inventory section of
+the build report):
+  Loading:    loading-screen, loading-emblem, loading-title,
+              loading-bar-track, loading-progress-fill,
+              loading-progress-text, loading-tip-label, loading-lore-tip
+  Death:      death-screen, death-skull, death-title, death-subtitle,
+              death-stats, btn-respawn, btn-death-lobby
+  Pause:      pause-screen, pause-title, pause-subtitle, btn-resume,
+              btn-pause-settings, btn-pause-quit, btn-pause-open
+  Vitals:     player-vitals, vitals-hp-track, player-hp-fill,
+              player-hp-text, vitals-mana-track, player-mana-fill,
+              player-mana-text
+  Buffs:      buff-bar
+  Feed:       kill-feed
+  Toasts:     event-toasts
+  DmgNums:    damage-numbers-canvas
+  Menu tabs:  lobby-tabs, lobby-tab-play, lobby-tab-chamber,
+              lobby-tab-settings, lobby-panel-play, lobby-panel-chamber,
+              lobby-panel-settings, btn-menu-open-settings, btn-quickplay
+              (hidden alias -> forwards to btn-quickplay-match)
+  Misc:       auth-account-bar, auth-account-summary, class-preview-card,
+              hud-quest-banner, hero-status-pill, right-hud-stack,
+              right-hud-body, tactical-command-bar, procedural-floor-panel,
+              boss-hp-track-container (structural; all pre-existing JS hooks
+              inside them preserved)
+
+MINIMAP: untouched system. #dungeon-minimap canvas + #minimap-zone-label
+kept; main.js:1475 still grabs the canvas by id and hands it to the
+minimap module. Only the frame styling changed.
+
+TOUCH CONTROLS: controls.js logic untouched. #joystick-zone/base/knob,
+.abilities-zone, .action-btn/.skill-btn/#btn-attack etc. only restyled
+(≥44px targets, safe-area insets, arc layout preserved).
+
+SETTINGS: SettingsPanel (settingspanel.js) was never instantiated before;
+initMainMenu() now constructs it with the game app and create()s it, so
+the Codex tab's "OPEN FULL SETTINGS" button and the pause menu's
+Settings button open the real panel. Panel creates its own ids
+(settings-panel, setting-*, btn-close-settings, ...) dynamically as before.
+
+REMOVED: the stale trycloudflare phone URL from the lobby/room headers
+(replaced with neutral invite copy). No JS referenced it.

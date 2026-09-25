@@ -1,0 +1,95 @@
+INTEGRATION — LEVELS TRACK (biome room templates, prop placement, atmosphere)
+================================================================================
+Owner: level-design track (2b). Coordinator: wire the two main.js touch points
+below; everything else is already active inside DungeonBuilder.
+
+WHAT WAS BUILT
+-------------
+New modules (client/js/):
+  biomes.js      - 4 themed templates (crypt / cavern / forge / throne_room):
+                   prop placement rules, material palette keys, lighting mood,
+                   FogExp2 color+density, particle language, torch language.
+                   Exports: BIOME_TEMPLATES, BIOME_IDS, LEGACY_BIOME_MAP,
+                   resolveBiomeTemplate(id), ZONE_DEFS (8 citadel zones),
+                   KEEP_OUTS, assignZoneBiomes(seed, themeId?), dominantTemplate().
+  propPlacer.js  - PropPlacer class. Procedural PBR prop builders with shared
+                   geometry/material caches (sarcophagus, bone_pile,
+                   crypt_pillar, altar, stalagmite, stalactite_cluster,
+                   rock_spire, ember_vent, anvil, lava_channel, hanging_chain,
+                   crucible, throne, grand_pillar, banner, brazier, chest,
+                   torch, rubble) + seeded rejection sampling against KEEP_OUTS
+                   + per-zone floor overlay textures.
+  atmosphere.js  - Atmosphere class. Owns scene.fog (FogExp2 per dominant
+                   biome), ambient+hemisphere mood lights, per-zone
+                   THREE.Points particle systems (dust/ash/embers/motes),
+                   flame sprites + flicker (capped at 8 real PointLights),
+                   emissive pulse for lava/ember vents.
+
+Edited (signatures intact):
+  client/js/dungeon.js
+    - DungeonBuilder constructor now creates Atmosphere + PropPlacer and
+      finalizes the 12 citadel wall torches into flickering flame sprites
+      with a capped set of real point lights.
+    - applyProceduralFloorConfig(config) — SAME signature main.js already
+      calls. Now: legacy material retint (kept) -> seeded per-zone biome
+      assignment (config.seed) -> global fog/mood from dominant biome ->
+      per-zone prop decoration -> per-zone particles -> GLB prop respawn
+      (kept). Exposes this.lastZoneBiomes / this.lastDominantBiome.
+    - NEW method DungeonBuilder.update(dt, t) — advances atmosphere
+      animation. MUST be called every frame (see below).
+  src/core/level_generator.js
+    - Seeded RNG (mulberry32, seed honored — previously ignored).
+    - Rooms carry biome tags (throne_room spawn, forge boss, seeded middle,
+      no adjacent repeats); corridors carry explicit door objects
+      (exit/entry per room); rooms carry data-only prop plans.
+    - Fixed a latent infinite loop in DungeonGenerator.carveCorridor
+      (fractional centers made `while (x !== to.x)` never terminate).
+    - `node src/core/level_generator.js` runs a headless self-test.
+    - Exports unchanged + BIOME_IDS, BIOME_PROP_TABLE, hashSeed, mulberry32.
+
+COORDINATOR WIRING — client/js/main.js (2 edits, nothing else needed)
+---------------------------------------------------------------------
+No index.html change needed: dungeon.js imports ./biomes.js,
+./propPlacer.js, ./atmosphere.js relatively, and main.js already calls
+applyProceduralFloorConfig on `procedural_floor_generated` + snapshots.
+
+1) Per-frame atmosphere tick. In renderLoop(), next to the other updates:
+
+     // Update Visuals & Animations
+     this.combat.update(dt);
+     this.loot.update(dt);
+     this.entities.update(dt);
+     if (this.dungeon && typeof this.dungeon.update === 'function') {
+       this.dungeon.update(dt, t * 0.001);
+     }
+
+   (t is the rAF timestamp already in scope as renderLoop(t).)
+
+2) NOTHING else. Fog, particles, torch flicker, prop decoration, and floor
+   overlays all activate automatically inside applyProceduralFloorConfig.
+
+OPTIONAL (later, not required)
+------------------------------
+- HUD: this.dungeon.lastZoneBiomes -> [{zone, biome}] and
+  this.dungeon.lastDominantBiome -> 'crypt'|'cavern'|'forge'|'throne_room'
+  for a "floor theme" readout.
+- The server still sends one legacy biome id per floor; it is mapped via
+  LEGACY_BIOME_MAP and used as a theme bias (~55%) in zone assignment, so
+  the floor keeps a coherent identity while zones vary.
+
+PERF NOTES
+----------
+- Real point lights: 8 max (Atmosphere.MAX_TORCH_LIGHTS). All other flames
+  are additive sprites; lava/ember are emissive pulses (no lights).
+- Particles: 8 zones x 130-190 THREE.Points each, one CPU position update.
+- Geometries/materials are module-level cached; textures are canvas-cached.
+
+VERIFICATION PERFORMED
+----------------------
+- node --check on level_generator.js; node --input-type=module --check on
+  biomes.js, atmosphere.js, propPlacer.js, dungeon.js — all pass.
+- node src/core/level_generator.js — self-test OK (biome tags, doors link
+  rooms, prop plans in-bounds, seed determinism, no adjacent biome repeats).
+- Headless biome assignment test — OK (8 zones, adjacency rule, theme bias,
+  legacy map coverage, determinism).
+- Server boot: node server/server.js binds clean (npm start unaffected).
