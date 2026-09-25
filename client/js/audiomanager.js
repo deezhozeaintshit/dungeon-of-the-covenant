@@ -726,6 +726,9 @@ export class AudioManager {
       case 'ui_select':
         this.playMetallicSheathSelectSFX(now);
         break;
+      case 'ui_deny':
+        this.playDenyThudSFX(now);
+        break;
       default:
         this.playStoneRuneClickSFX(now);
         break;
@@ -1032,6 +1035,12 @@ export class AudioManager {
     // Crisp sword-in-scabbard steel ring
     this.playFilteredNoise(now, 0.09, 'highpass', 2400, 4800, 3.0, 0.18);
     this.playPartial(1174.66, 1760, now, 0.14, 'sine', 0.15);
+  }
+
+  playDenyThudSFX(now) {
+    // Low muted double-thud: locked / denied
+    this.playPartial(160, 70, now, 0.09, 'sine', 0.22);
+    this.playPartial(140, 60, now + 0.11, 0.12, 'sine', 0.20);
   }
 
   destroy() {
