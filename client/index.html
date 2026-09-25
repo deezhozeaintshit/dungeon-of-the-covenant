@@ -414,41 +414,43 @@
     </div>
 
     <!-- Mobile ability arc -->
+    <!-- [Phase4-WS5] aria-labels for WCAG; attack-cd overlay mirrors the other skill overlays -->
     <div class="abilities-zone">
-      <button id="btn-open-ping" class="action-btn ping-trigger-btn" title="Party Ping">📍</button>
+      <button id="btn-open-ping" class="action-btn ping-trigger-btn" title="Party Ping" aria-label="Party ping">📍</button>
 
-      <button id="btn-jump" class="action-btn skill-btn jump-btn" data-skill="jump" title="Jump Over Ledges & Pull Nearby Loot (Spacebar / Gamepad A)">
+      <button id="btn-jump" class="action-btn skill-btn jump-btn" data-skill="jump" title="Jump Over Ledges & Pull Nearby Loot (Spacebar / Gamepad A)" aria-label="Jump over ledges and pull nearby loot">
         <div class="skill-icon">🦘</div>
         <div class="skill-cooldown-overlay" id="jump-cd"></div>
         <span class="skill-label">JUMP</span>
       </button>
 
-      <button id="btn-dash" class="action-btn skill-btn dash-btn" data-skill="dash" title="Tactical Dodge Dash (Shift / Gamepad B - Invulnerable i-frames)">
+      <button id="btn-dash" class="action-btn skill-btn dash-btn" data-skill="dash" title="Tactical Dodge Dash (Shift / Gamepad B - Invulnerable i-frames)" aria-label="Tactical dodge dash">
         <div class="skill-icon">💨</div>
         <div class="skill-cooldown-overlay" id="dash-cd"></div>
         <span class="skill-label">DASH</span>
       </button>
 
-      <button id="btn-skill-1" class="action-btn skill-btn" data-skill="1" title="Ability 1">
+      <button id="btn-skill-1" class="action-btn skill-btn" data-skill="1" title="Ability 1" aria-label="Ability 1">
         <div class="skill-icon" id="skill-1-icon">💥</div>
         <div class="skill-cooldown-overlay" id="skill-1-cd"></div>
         <span class="skill-label" id="skill-1-label">S1</span>
       </button>
 
-      <button id="btn-skill-2" class="action-btn skill-btn" data-skill="2" title="Ability 2">
+      <button id="btn-skill-2" class="action-btn skill-btn" data-skill="2" title="Ability 2" aria-label="Ability 2">
         <div class="skill-icon" id="skill-2-icon">🛡️</div>
         <div class="skill-cooldown-overlay" id="skill-2-cd"></div>
         <span class="skill-label" id="skill-2-label">S2</span>
       </button>
 
-      <button id="btn-skill-3" class="action-btn skill-btn ultimate" data-skill="3" title="Ultimate Ability">
+      <button id="btn-skill-3" class="action-btn skill-btn ultimate" data-skill="3" title="Ultimate Ability" aria-label="Ultimate ability">
         <div class="skill-icon" id="skill-3-icon">⚡</div>
         <div class="skill-cooldown-overlay" id="skill-3-cd"></div>
         <span class="skill-label" id="skill-3-label">S3</span>
       </button>
 
-      <button id="btn-attack" class="action-btn attack-btn" data-skill="attack" title="Basic Attack">
+      <button id="btn-attack" class="action-btn attack-btn" data-skill="attack" title="Basic Attack" aria-label="Basic attack">
         <div class="attack-icon">⚔️</div>
+        <div class="skill-cooldown-overlay" id="attack-cd"></div>
       </button>
     </div>
   </div>

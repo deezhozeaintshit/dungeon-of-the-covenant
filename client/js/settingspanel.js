@@ -110,6 +110,15 @@ export class SettingsPanel {
           </div>
           <!-- Controls Settings -->
           <div class="settings-tab" id="tab-controls">
+            <!-- [Phase4-WS5] Touch controls: Auto (detect) / On / Off -->
+            <div class="setting-row">
+              <label for="setting-touchcontrols">Touch Controls</label>
+              <select id="setting-touchcontrols" aria-label="Touch controls mode">
+                <option value="auto">Auto (detect device)</option>
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
             <div class="setting-row">
               <label>Move Forward</label>
               <span class="key-bind">W / ↑</span>
@@ -201,6 +210,17 @@ export class SettingsPanel {
     document.querySelector('.settings-overlay')?.addEventListener('click', () => {
       this.close();
     });
+
+    // [Phase4-WS5] Touch controls preference: sync select with live manager state
+    // and apply changes immediately (persisted to localStorage by the manager).
+    const touchSel = document.getElementById('setting-touchcontrols');
+    if (touchSel) {
+      const cur = this.game.touchControls?.preference || 'auto';
+      touchSel.value = cur;
+      touchSel.addEventListener('change', (e) => {
+        this.game.touchControls?.setPreference(e.target.value);
+      });
+    }
 
     // Save button
     document.getElementById('btn-save-settings')?.addEventListener('click', () => {

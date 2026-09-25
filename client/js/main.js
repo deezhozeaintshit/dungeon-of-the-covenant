@@ -5,6 +5,8 @@ import { DungeonBuilder } from './dungeon.js?v=9.0';
 import { EntityManager } from './entities.js?v=9.0';
 import { CombatVisuals } from './combat.js?v=9.0';
 import { GameControls } from './controls.js?v=9.0';
+// [Phase4-WS5] Touch controls manager: auto-detect + Auto/On/Off preference + optimistic cooldown sweeps.
+import { TouchControlsManager } from './ui/touchControls.js?v=9.0';
 import { NarratorSystem } from './narrator.js?v=9.0';
 import { LootSystem } from './loot.js?v=9.0';
 import { NetworkClient } from './network.js?v=9.0';
@@ -175,6 +177,11 @@ class GameApp {
     this.narrator = new NarratorSystem(this.audio);
     this.initNetwork();
 
+    // [Phase4-WS5] Init touch controls layer BEFORE GameControls so the body
+    // class gating (touch-active) applies before any input UI binds.
+    this.touchControls = new TouchControlsManager();
+    this.touchControls.init();
+
     this.controls = new GameControls({
       onInput: (vec, rot) => {
         if (this.gameState === 'dungeon' && this.network) {
@@ -185,6 +192,8 @@ class GameApp {
         if (this.gameState === 'dungeon' && this.network) {
           this.playActionSFX(action);
           this.network.sendInput({ action, targetPos, rotation, targetId });
+          // [Phase4-WS5] Optimistic touch cooldown sweep (fills tap-to-snapshot gap).
+          this.touchControls?.markActionFired(action);
 
           // Only trigger weapon swing animation & slash arc on combat attacks/skills (not jump or loot)
           if (action !== 'jump' && action !== 'loot' && action !== 'dash' && this.entities && this.combat) {
@@ -1139,11 +1148,12 @@ class GameApp {
     // timestamped, older than the window evicted). Capture resolution/fps
     // follows the Phase 3 PerformanceMonitor tier; buffering pauses when the
     // tab is hidden. Local-only until the player downloads or shares.
+    // The canvas is attached here, but buffering starts on dungeon entry
+    // (enterDungeon) so the 30s window always holds gameplay, not menu footage.
     try {
       this.clipRecorder = new ClipRecorder({ perfMonitor: this.perfMonitor });
-      if (this.renderer && this.renderer.renderer &&
-          this.clipRecorder.attach(this.renderer.renderer.domElement)) {
-        this.clipRecorder.start();
+      if (this.renderer && this.renderer.renderer) {
+        this.clipRecorder.attach(this.renderer.renderer.domElement);
       }
       this.clipUI = initClipButton({
         recorder: this.clipRecorder,
@@ -1741,7 +1751,10 @@ class GameApp {
 
         // Update Live Ability Cooldown Sweep Overlays
         const cds = p.cooldowns || {};
-        const maxCds = { skill1: 3.5, skill2: 6.0, skill3: 10.0, dash: 3.0 };
+        // [Phase4-WS5] Feed server cooldowns to the touch manager so optimistic
+        // sweeps learn real per-class maxima (and add attack/jump overlays).
+        this.touchControls?.observeServerCooldowns(cds);
+        const maxCds = { skill1: 3.5, skill2: 6.0, skill3: 10.0, dash: 3.0, jump: 0.65, attack: 0.6 };
         const updateCdEl = (elId, rem, max) => {
           const el = document.getElementById(elId);
           if (!el) return;
@@ -1753,6 +1766,8 @@ class GameApp {
         updateCdEl('skill-2-cd', cds.skill2 || 0, maxCds.skill2);
         updateCdEl('skill-3-cd', cds.skill3 || 0, maxCds.skill3);
         updateCdEl('dash-cd', cds.dash || 0, maxCds.dash);
+        updateCdEl('jump-cd', cds.jump || 0, maxCds.jump);
+        updateCdEl('attack-cd', cds.attack || 0, maxCds.attack);
       }
     });
   }
@@ -1872,6 +1887,8 @@ class GameApp {
 
     // Update Controls
     this.controls.update(dt);
+    // [Phase4-WS5] Advance optimistic touch cooldown sweeps.
+    this.touchControls?.tick(performance.now());
 
     // Update Visuals & Animations
     this.combat.update(dt);
