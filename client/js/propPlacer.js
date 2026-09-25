@@ -13,6 +13,11 @@
 // server, the network, or entity code.
 
 import * as THREE from '/vendor/three.module.js';
+// Phase 4 (workstream 6: PERFORMANCE PASS): InstancedMesh batching for static
+// props + distance LOD on instanced decor parts. See client/js/perf/.
+import { PropInstancer, STATIC_PROP_TYPES } from './perf/propInstancer.js';
+// [perf-workstream] within-prop static part merging for dynamic props.
+import { batchStaticMeshes, isBatchingEnabled, disposeBatchedMeshes } from './perf/staticBatcher.js';
 
 // ---------------------------------------------------------------- caches
 const geoCache = new Map();
@@ -461,6 +466,23 @@ export class PropPlacer {
     this.atmosphere = atmosphere;
     this.group = null;
     this.keepOuts = [];
+    // Phase 4 (workstream 6: PERFORMANCE PASS): InstancedMesh batching for
+    // static props. On by default; setInstancing(false) restores the legacy
+    // one-mesh-per-part path (used by the perf benchmark baseline).
+    this.instancing = true;
+    this.instancer = null;
+  }
+
+  // Phase 4 perf: toggle InstancedMesh batching. Takes effect on the next
+  // decorateZones() call.
+  setInstancing(on) {
+    this.instancing = !!on;
+  }
+
+  // Phase 4 perf: distance LOD for instanced prop decor parts (throttled
+  // internally; safe to call every frame).
+  updateLOD(camera) {
+    if (this.instancer) this.instancer.updateLOD(camera);
   }
 
   setKeepOuts(list) {
@@ -469,9 +491,13 @@ export class PropPlacer {
 
   clear() {
     if (this.group) {
+      // [perf-workstream] release batcher-owned merged geometry (Phase 4).
+      disposeBatchedMeshes(this.group);
       this.scene.remove(this.group);
       this.group = null;
     }
+    // Phase 4 perf: drop batched instance data with the group.
+    if (this.instancer) this.instancer.reset();
   }
 
   hitsKeepOut(x, z, rad) {
@@ -559,6 +585,15 @@ export class PropPlacer {
     this.clear();
     this.group = new THREE.Group();
     this.scene.add(this.group);
+    // Phase 4 (workstream 6: PERFORMANCE PASS): (re)create the instancing
+    // batcher for this floor. Templates are baked from the same BUILDERS
+    // with fixed seeds, so layouts stay seed-stable.
+    if (this.instancing) {
+      this.instancer = new PropInstancer((type, template, seedRng) =>
+        BUILDERS[type](seedRng, template, null));
+    } else {
+      this.instancer = null;
+    }
 
     for (const { zone, template } of assignments) {
       this.addFloorOverlay(zone, template);
@@ -588,7 +623,28 @@ export class PropPlacer {
 
           const builder = BUILDERS[rule.type];
           if (!builder) continue;
+          // Phase 4 (workstream 6: PERFORMANCE PASS): static prop types are
+          // batched into InstancedMeshes (one draw call per part instead of
+          // per prop) with per-instance rotation/scale/tint variation.
+          // Dynamic props (pulses, flames, torch lights) keep individual
+          // groups. Placement sampling is unchanged, so layouts stay
+          // seed-stable.
+          if (this.instancing && this.instancer && STATIC_PROP_TYPES.has(rule.type)) {
+            const iRotY = spot.faceCenter
+              ? Math.atan2(spot.cx - spot.x, spot.cz - spot.z)
+              : rng() * Math.PI * 2;
+            this.instancer.addPlacement(rule.type, template, spot.x, spot.z, iRotY, placed.length);
+            placed.push({ x: spot.x, z: spot.z, radius: rule.radius });
+            continue;
+          }
           const built = builder(rng, template, this.atmosphere);
+          // [perf-workstream] merge this dynamic prop's static parts per
+          // material (Phase 4): e.g. crucible legs+pot collapse into one mesh,
+          // vent cracks sharing the pulsing material collapse into one. Flame
+          // sprites / point lights / pulsing materials are untouched, so
+          // per-instance animation is unaffected. Local transforms bake here;
+          // the group itself is positioned/rotated below.
+          if (isBatchingEnabled()) batchStaticMeshes(built.group);
           built.group.position.set(spot.x, 0, spot.z);
           if (spot.faceCenter) {
             built.group.rotation.y = Math.atan2(spot.cx - spot.x, spot.cz - spot.z);
@@ -604,6 +660,8 @@ export class PropPlacer {
         }
       }
     }
+    // Phase 4 perf: flush the instanced batches into the group.
+    if (this.instancing && this.instancer) this.instancer.finalize(this.group);
   }
 
   addFloorOverlay(zone, template) {

@@ -1,0 +1,138 @@
+{
+  "generated": "2026-09-25T20:04:54.309Z",
+  "note": "Headless node benchmark: no GPU. Draw calls/triangles counted analytically from the scene graph (matches renderer.info semantics). UnrealBloomPass GPU cost not measurable here; the auto-degrade path that sheds it is verified in section D.",
+  "baseline": {
+    "calls": 1367,
+    "triangles": 60757
+  },
+  "optimizedTypicalView": {
+    "calls": 718,
+    "triangles": 47933
+  },
+  "optimizedFarView": {
+    "calls": 470,
+    "triangles": 29940
+  },
+  "drawCallReductionTypical": 0.475,
+  "instancing": {
+    "types": 15,
+    "instancedMeshes": 83,
+    "instances": 78
+  },
+  "cinderGLBVerts": 37074,
+  "cinderImpostorTris": 254,
+  "cpuLogicMsPerFrame": 0.471,
+  "entitiesUpdateIncluded": true,
+  "checks": [
+    {
+      "name": "mob near tier: nothing hidden",
+      "pass": true,
+      "detail": "8 body meshes"
+    },
+    {
+      "name": "mob far tier: decor+fine hidden, core kept",
+      "pass": true,
+      "detail": "hidden=4 visible=4"
+    },
+    {
+      "name": "mob hysteresis: no flicker within +/-2 of boundary",
+      "pass": true,
+      "detail": "level=1->1"
+    },
+    {
+      "name": "mob threat ring batched, untouched by LOD",
+      "pass": true,
+      "detail": "ringBatcher.count=1"
+    },
+    {
+      "name": "cinder impostor attached (1 mesh, 1 material)",
+      "pass": true,
+      "detail": "tris=254"
+    },
+    {
+      "name": "cinder near: GLB visible, impostor hidden, wisps on",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "cinder mid: GLB visible, wisps off (fill-rate win)",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "cinder far: GLB hidden, impostor visible",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "name": "cinder hysteresis: no flicker at boundary",
+      "pass": true,
+      "detail": "level=2"
+    },
+    {
+      "name": "cinder impostor < 1000 tris (vs 37,074-vert GLB)",
+      "pass": true,
+      "detail": "254 tris"
+    },
+    {
+      "name": "nextQualityTier('high', 20) === 'low'",
+      "pass": true,
+      "detail": "got 'low'"
+    },
+    {
+      "name": "nextQualityTier('low', 20) === 'off'",
+      "pass": true,
+      "detail": "got 'off'"
+    },
+    {
+      "name": "nextQualityTier('off', 20) === 'off'",
+      "pass": true,
+      "detail": "got 'off'"
+    },
+    {
+      "name": "nextQualityTier('off', 60) === 'low'",
+      "pass": true,
+      "detail": "got 'low'"
+    },
+    {
+      "name": "nextQualityTier('low', 60) === 'high'",
+      "pass": true,
+      "detail": "got 'high'"
+    },
+    {
+      "name": "nextQualityTier('high', 60) === 'high'",
+      "pass": true,
+      "detail": "got 'high'"
+    },
+    {
+      "name": "nextQualityTier('high', 28) === 'high'",
+      "pass": true,
+      "detail": "got 'high'"
+    },
+    {
+      "name": "nextQualityTier('low', 54) === 'low'",
+      "pass": true,
+      "detail": "got 'low'"
+    },
+    {
+      "name": "cinder_thrall.glb embedded textures within budget",
+      "pass": true,
+      "detail": "embedded: 1024x1024, 512x512, 1024x1024 (budget: 1K common)"
+    },
+    {
+      "name": "cover/promo art within 2K budget",
+      "pass": true,
+      "detail": "cover_art.jpg=1376x768, promo_boss.jpg=1376x768, promo_combos.jpg=1376x768"
+    },
+    {
+      "name": "procedural canvas textures <= 256px (code-inspected)",
+      "pass": true,
+      "detail": "max 256px floor/biome textures"
+    },
+    {
+      "name": "per-frame JS logic < 8ms (leaves headroom for GPU)",
+      "pass": true,
+      "detail": "0.47 ms"
+    }
+  ]
+}
