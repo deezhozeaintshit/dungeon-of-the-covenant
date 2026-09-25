@@ -52,6 +52,10 @@ export class EnemyVisuals {
     const windupMs = msg.windupMs || Math.round((tel.duration || 1) * 1000);
     const radius = Math.max(0.5, tel.radius || 3);
     const color = tel.color != null ? tel.color : 0xff2222;
+    // Phase 3: boss telegraphs get a heavier treatment (thicker edge ring,
+    // stronger pulse) so multi-phase boss attacks read differently from mob
+    // attacks — the decal geometry path is shared with the legacy handler.
+    const isBoss = !!msg.isBoss;
 
     // Replace any duplicate id (re-telegraph).
     this._removeTelegraph(tel.id);
@@ -79,6 +83,7 @@ export class EnemyVisuals {
     });
 
     let fill = null;
+    const edgeWidth = isBoss ? 0.34 : 0.14;
     if (tel.shape === 'cone') {
       const arc = tel.coneAngle || Math.PI * 0.66;
       const geo = new THREE.CircleGeometry(radius, 28, -arc / 2, arc);
@@ -88,13 +93,13 @@ export class EnemyVisuals {
       group.add(mesh);
       fill = mesh;
       fill.scale.set(0.01, 0.01, 0.01); // sweep grows with windup
-      const edgeGeo = new THREE.RingGeometry(radius - 0.12, radius, 28, 1, -arc / 2, arc);
+      const edgeGeo = new THREE.RingGeometry(radius - edgeWidth, radius, 28, 1, -arc / 2, arc);
       const edge = new THREE.Mesh(edgeGeo, edgeMat);
       edge.rotation.x = -Math.PI / 2;
       edge.rotation.z = (tel.angle || 0) + Math.PI / 2;
       group.add(edge);
     } else if (tel.shape === 'point') {
-      const geo = new THREE.RingGeometry(0.35, 0.55, 20);
+      const geo = new THREE.RingGeometry(0.35, isBoss ? 0.85 : 0.55, 20);
       const mesh = new THREE.Mesh(geo, edgeMat);
       mesh.rotation.x = -Math.PI / 2;
       group.add(mesh);
@@ -105,7 +110,7 @@ export class EnemyVisuals {
       group.add(disc);
       fill = disc;
       fill.scale.set(0.01, 0.01, 0.01);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(radius - 0.14, radius, 48), edgeMat);
+      const ring = new THREE.Mesh(new THREE.RingGeometry(radius - edgeWidth, radius, 48), edgeMat);
       ring.rotation.x = -Math.PI / 2;
       group.add(ring);
     }
@@ -116,7 +121,8 @@ export class EnemyVisuals {
       group, fill,
       start: performance.now(),
       windupMs: Math.max(200, windupMs),
-      pulse: Math.random() * Math.PI * 2
+      pulse: Math.random() * Math.PI * 2,
+      isBoss
     });
   }
 
@@ -355,11 +361,15 @@ export class EnemyVisuals {
         const s = Math.max(0.01, k);
         t.fill.scale.set(s, s, s);
       }
-      t.pulse += (dt || 0.016) * (4 + k * 10);
+      t.pulse += (dt || 0.016) * (4 + k * 10) * (t.isBoss ? 1.5 : 1);
       const pulse = 0.55 + 0.45 * Math.sin(t.pulse);
       t.group.traverse((o) => {
         if (o.material && o.material.transparent) {
-          o.material.opacity = (o === t.fill ? 0.28 : 0.85) * (0.6 + 0.4 * pulse);
+          const base = o === t.fill ? 0.28 : 0.85;
+          // Boss decals pulse harder and hold a stronger glow mid-fight.
+          o.material.opacity = t.isBoss
+            ? base * (0.75 + 0.45 * pulse)
+            : base * (0.6 + 0.4 * pulse);
         }
       });
       if (k >= 1) {

@@ -47,6 +47,26 @@ Field notes:
 - `angle` / `coneAngle` are omitted (or 0) for circles.
 - `isBoss: true` only for PhaseBoss telegraphs; the client may scale the
   decal treatment (thicker ring, screen shake is sent separately).
+
+## Phase 3 addition (workstream 4) — volley & summon are telegraphed
+
+`volley` and `summon_adds` previously fired instantly. They now broadcast
+`enemy_telegraph` with `isBoss: true` ahead of the attack, same as the other
+three signature attacks:
+
+| attack id   | kind          | windupMs | shape  | radius | impact on resolve |
+|-------------|---------------|----------|--------|--------|-------------------|
+| `aoe_slam`  | `aoe_slam`    | 1800     | circle | 6.5    | AoE damage + stun |
+| `cone_sweep`| `cone_sweep`  | 1400     | cone   | 7.0    | cone damage       |
+| `leap`      | `leap`        | 1600     | circle | 4.5    | boss moves, AoE   |
+| `volley`    | `volley`      | 1000     | circle | 3.5    | ring of projectiles fires from the boss (aimed at the nearest living player at resolve) |
+| `summon_adds` | `summon_adds` | 1200   | circle | 5.0    | adds spawn at pre-rolled spots around the boss |
+
+No `screen_shake` is sent for `volley` / `summon_adds` (warning, not impact).
+`windupMs` always equals `telegraph.duration * 1000`, so the client decal
+fills exactly until the hit lands. Verified headless in
+`tests/phase3-boss-telegraphs.test.cjs` (telegraph precedes the impact by
+exactly the configured windup for all 4 biome bosses × all attacks they field).
 - The payload shape is intentionally identical to the existing
   `telegraph_start.telegraph` object, so `client/js/enemies.js` can share
   decal geometry with the legacy path.

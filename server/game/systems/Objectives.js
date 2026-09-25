@@ -521,7 +521,10 @@ class Objectives {
       carrierId: obj.data.carrierId || null,
       altar: obj.data.altar ? { ...obj.data.altar } : null,
       shrines: Array.isArray(obj.data.shrines)
-        ? obj.data.shrines.map(s => ({ ...s })) : null
+        ? obj.data.shrines.map(s => ({ ...s })) : null,
+      // Phase 3: minimap objective markers (client/js/minimapenhanced.js).
+      relicSpot: obj.data.relicSpot ? { ...obj.data.relicSpot } : null,
+      wardenType: obj.data.wardenType || null,
     };
   }
 
