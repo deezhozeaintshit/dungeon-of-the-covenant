@@ -17,6 +17,11 @@ export class EntityManager {
     this.playerMeshes = new Map();
     this.mobMeshes = new Map();
     this.bossMesh = null;
+    // Phase 3 game feel: real-event VFX callbacks wired by the game app.
+    // onMobRemoved(id, x, z) fires when a mob leaves the snapshot (died).
+    // onBossDied(x, z) fires once on the boss death transition.
+    this.onMobRemoved = null;
+    this.onBossDied = null;
     this.targetReticle = this.createTargetReticle();
     this.scene.add(this.targetReticle);
     // Shared PMREM environment for character PBR materials (set via setRenderer).
@@ -1000,6 +1005,10 @@ export class EntityManager {
 
     for (const [id, mesh] of this.mobMeshes.entries()) {
       if (!activeIds.has(id)) {
+        // Phase 3 game feel: mob death = pooled death burst at its position.
+        if (this.onMobRemoved && mesh && mesh.position) {
+          try { this.onMobRemoved(id, mesh.position.x, mesh.position.z); } catch (e) { /* VFX must never break sync */ }
+        }
         this.scene.remove(mesh);
         this.mobMeshes.delete(id);
       }
@@ -1370,7 +1379,13 @@ export class EntityManager {
       const bg = this.bossMesh.userData.bodyGroup;
       if (bg) {
         const st = bg.userData.combatAnim;
-        if (!st || st.deathT < 0) triggerDeathFade(bg);
+        if (!st || st.deathT < 0) {
+          triggerDeathFade(bg);
+          // Phase 3 game feel: boss kill celebration, fired once on transition.
+          if (this.onBossDied) {
+            try { this.onBossDied(bossData.x, bossData.z); } catch (e) { /* VFX must never break sync */ }
+          }
+        }
       }
       if (this.bossMesh.userData.deathCrater) {
         this.bossMesh.userData.deathCrater.visible = true;

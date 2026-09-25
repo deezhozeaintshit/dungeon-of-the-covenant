@@ -35,6 +35,7 @@ import { QualityOfLife } from './qualityoflife.js?v=9.1';
 // (Mixamo clip binding moved to entities.js _bindHeroClipSet.)
 import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
 import { initOathModal } from './ui/oathModal.js';
+import { initMetaProgression } from './ui/metaProgression.js';
 // Phase 3: server-authoritative loot inventory + equipment panel (workstream 2).
 import { initInventoryPanel } from './ui/inventory.js';
 
@@ -326,6 +327,24 @@ class GameApp {
       }
     }
 
+    // Phase 3 meta-progression (workstream 5): persistent account ranks +
+    // Covenant Vault unlockables. Server-authoritative; the client only
+    // renders state and sends itemIds for purchases.
+    this.metaUI = initMetaProgression({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      getAuthToken: () => this.authToken,
+      getLocalPlayerId: () => this.localPlayerId,
+      onState: () => this.applyMetaClassLocks(),
+      onClaim: () => this.audio.playSFX('powerup')
+    });
+    if (this.metaUI && this.metaUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.metaUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
+    }
+    this.metaUI.refresh();
+
     // Phase 3: server-authoritative inventory + equipment (workstream 2).
     // The panel is display-only; equip/unequip send id/slot to the server,
     // which validates and broadcasts the authoritative inventory_update.
@@ -486,6 +505,13 @@ class GameApp {
         <span class="class-role">${info.role}</span>
       `;
       btn.addEventListener('click', () => {
+        // Phase 3 meta-progression: vault-locked classes open the Vault instead.
+        if (this.isClassLocked(key)) {
+          this.audio.playSFX('ui_deny');
+          this.narrator.say(`The ${info.name} is sealed in the Covenant Vault. Claim it there to march as one.`, 'warning');
+          if (this.metaUI) this.metaUI.openVault('classes');
+          return;
+        }
         this.selectClass(key);
         this.audio.playSFX('ui_select');
       });
@@ -493,9 +519,62 @@ class GameApp {
     }
 
     this.updateClassPreview();
+    this.applyMetaClassLocks();
+  }
+
+  // Phase 3 meta-progression: is this hero class sealed in the Covenant Vault
+  // for the current account? Base six are always available.
+  isClassLocked(key) {
+    const info = CLASSES[key];
+    if (!info || !info.unlockable) return false;
+    const unlocked = this.metaUI?.getState()?.meta?.unlockedClasses || [];
+    return !unlocked.includes(key);
+  }
+
+  // Paint lock state onto the class grid from the vault catalog. Called after
+  // the grid is built and whenever vault state refreshes.
+  applyMetaClassLocks() {
+    const grid = document.getElementById('class-grid');
+    if (!grid) return;
+    const catalog = this.metaUI?.getState()?.catalog || [];
+    for (const btn of grid.querySelectorAll('.class-btn')) {
+      const key = btn.getAttribute('data-class');
+      const locked = this.isClassLocked(key);
+      btn.classList.toggle('locked', locked);
+      btn.setAttribute('aria-disabled', locked ? 'true' : 'false');
+      if (locked) {
+        const item = catalog.find(u => u.type === 'class' && u.classKey === key);
+        const req = item ? `${item.rankName} + ${item.cost.toLocaleString()} seals` : 'Covenant Vault';
+        if (!btn.querySelector('.class-lock')) {
+          const lockEl = document.createElement('span');
+          lockEl.className = 'class-lock';
+          lockEl.textContent = '🔒';
+          lockEl.setAttribute('aria-hidden', 'true');
+          btn.appendChild(lockEl);
+          const reqEl = document.createElement('span');
+          reqEl.className = 'class-lock-req';
+          reqEl.textContent = `🔒 ${req}`;
+          btn.appendChild(reqEl);
+        }
+        btn.title = `Sealed in the Covenant Vault — requires ${req}`;
+      } else {
+        btn.querySelector('.class-lock')?.remove();
+        btn.querySelector('.class-lock-req')?.remove();
+        btn.removeAttribute('title');
+      }
+    }
+    // Never leave a sealed class selected (e.g. after logout).
+    if (this.isClassLocked(this.selectedClass)) {
+      this.selectClass('juggernaut');
+    }
   }
 
   selectClass(key) {
+    // Phase 3: sealed classes can never be selected, even programmatically.
+    if (this.isClassLocked(key)) {
+      this.narrator.say(`The ${CLASSES[key]?.name || key} is sealed in the Covenant Vault.`, 'warning');
+      return;
+    }
     this.selectedClass = key;
     document.querySelectorAll('.class-btn').forEach(b => {
       b.classList.toggle('selected', b.getAttribute('data-class') === key);
@@ -543,6 +622,8 @@ class GameApp {
           this.audio.playSFX('powerup');
           if (badge) badge.innerText = `✅ Cloud Account Active: ${data.profile.displayName || username}`;
           this.narrator.say(`Welcome back, ${data.profile.displayName || username}! Cloud stats & gear restored.`, 'info');
+          // Phase 3: refresh covenant rank / vault state for the new session.
+          if (this.metaUI) this.metaUI.refresh();
         } else {
           if (badge) badge.innerText = `⚠️ ${data?.error || 'Auth failed'}`;
         }
@@ -557,7 +638,7 @@ class GameApp {
       quickplayBtn.innerText = '⚔️ ENTERING RANDOM DUNGEON MATCH...';
       const name = document.getElementById('player-name-input')?.value.trim() || 'Vanguard';
       this.audio.playSFX('war_horn');
-      this.network.quickplayMatchmaking(name, this.selectedClass, this.profile);
+      this.network.quickplayMatchmaking(name, this.selectedClass, this.profile, this.authToken);
     });
 
     // Optional Private Chamber Create / Join
@@ -566,7 +647,7 @@ class GameApp {
       createBtn.innerText = 'CREATING CHAMBER...';
       const name = document.getElementById('player-name-input').value.trim() || 'Hero';
       this.audio.playSFX('ui_click');
-      this.network.createRoom(name, this.selectedClass, this.profile);
+      this.network.createRoom(name, this.selectedClass, this.profile, this.authToken);
     });
 
     const joinBtn = document.getElementById('btn-join-room');
@@ -579,7 +660,7 @@ class GameApp {
       }
       joinBtn.innerText = 'JOINING...';
       this.audio.playSFX('ui_click');
-      this.network.joinRoom(code, name, this.selectedClass, this.profile);
+      this.network.joinRoom(code, name, this.selectedClass, this.profile, this.authToken);
     });
 
     // Open & Close Covenant Emporium & Sovereign Pass Modal
@@ -592,6 +673,12 @@ class GameApp {
     };
     document.getElementById('btn-lobby-emporium')?.addEventListener('click', openEmp);
     document.getElementById('btn-hud-emporium')?.addEventListener('click', openEmp);
+    // Phase 3 meta-progression: open the Covenant Vault (ranks + unlockables).
+    document.getElementById('btn-covenant-vault')?.addEventListener('click', (e) => {
+      e?.stopPropagation();
+      this.audio.playSFX('ui_select');
+      if (this.metaUI) this.metaUI.openVault();
+    });
     document.getElementById('btn-close-emporium')?.addEventListener('click', (e) => {
       e.stopPropagation();
       empModal?.classList.add('hidden');
@@ -1283,7 +1370,9 @@ class GameApp {
       },
       party_wipe: (msg) => {
         this.audio.playSFX('hurt');
-        alert('PARTY WIPE! The darkness consumed the covenant.');
+        // Phase 3: the covenant still remembers the attempt — the server
+        // grants reduced account XP/seals (meta_rewards toast follows).
+        alert('PARTY WIPE! The darkness consumed the covenant.\n\nThe Vault still records your deeds — earned account XP and seals await in the lobby.');
         setTimeout(() => window.location.reload(), 2000);
       },
       error: (msg) => {
@@ -1653,6 +1742,39 @@ class GameApp {
     // Unlock achievement
     this.achievements.unlock('boss_slayer');
     this.saveGameProgress();
+
+    // Phase 3 meta-progression: render the SERVER-COMPUTED account rewards
+    // (account XP, seals, rank-ups) into the covenant panel, then refresh the
+    // vault state so the lobby chip and class locks update.
+    const metaList = document.getElementById('meta-rewards-list');
+    if (metaList) {
+      metaList.innerHTML = '';
+      const rewards = summary.meta || [];
+      if (!rewards.length) {
+        const p = document.createElement('p');
+        p.className = 'meta-rewards-empty';
+        p.textContent = 'Guest expedition — log in to a Covenant account to earn persistent ranks and seals.';
+        metaList.appendChild(p);
+      }
+      for (const r of rewards) {
+        const row = document.createElement('div');
+        row.className = 'meta-reward-row';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'meta-reward-name';
+        nameEl.textContent = r.name;
+        const gainsEl = document.createElement('span');
+        gainsEl.className = 'meta-reward-gains';
+        gainsEl.textContent = `+${r.accountXpGained.toLocaleString()} account XP • +${r.sealsGained.toLocaleString()} 🔏 seals`;
+        const rankEl = document.createElement('span');
+        rankEl.className = 'meta-reward-rank';
+        rankEl.textContent = r.rankUp
+          ? `🔥 RANK UP — ${r.rank.icon} ${r.rank.name}!`
+          : `${r.rank.icon} ${r.rank.name}`;
+        row.append(nameEl, gainsEl, rankEl);
+        metaList.appendChild(row);
+      }
+    }
+    if (this.metaUI) this.metaUI.refresh();
   }
 
   renderLoop(time) {
