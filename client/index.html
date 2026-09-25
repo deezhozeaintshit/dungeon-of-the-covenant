@@ -10,6 +10,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css?v=5.0">
+  <!-- Phase 4 (workstream 3): clip button + preview modal styles -->
+  <link rel="stylesheet" href="css/clip.css?v=4.0">
   <script type="importmap">
     {
       "imports": {
@@ -256,6 +258,11 @@
         <button id="btn-pause-open" class="secret-tab-btn" title="Pause Menu">
           <span class="secret-icon">⏸️</span>
           <span class="secret-label">MENU</span>
+        </button>
+        <!-- Phase 4 (workstream 3): one-tap 30s gameplay clip (C). Local-only recording. -->
+        <button id="btn-clip" class="secret-tab-btn" title="Save the last 30 seconds of gameplay (C)" aria-label="Save the last 30 seconds of gameplay as a clip">
+          <span class="secret-icon">🎬</span>
+          <span class="secret-label">CLIP [C]</span>
         </button>
 
         <div id="gamepad-hud-badge" title="Gamepad / Controller Support Ready (Connect any Xbox/PS/USB Controller)">

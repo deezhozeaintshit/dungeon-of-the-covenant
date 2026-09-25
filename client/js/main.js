@@ -33,6 +33,10 @@ import { MinimapEnhanced } from './minimapenhanced.js';
 import { EnhancedCombatVFX } from './enhancedcombatvfx.js?v=9.1';
 import { PerformanceMonitor } from './performancemonitor.js?v=9.1';
 import { QualityOfLife } from './qualityoflife.js?v=9.1';
+// Phase 4 (workstream 3): one-tap 30s gameplay clip capture (ring buffer)
+// for the TikTok marketing flywheel.
+import { ClipRecorder } from './clipRecorder.js?v=4.0';
+import { initClipButton } from './clipUI.js?v=4.0';
 // (Mixamo clip binding moved to entities.js _bindHeroClipSet.)
 import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
 import { initOathModal } from './ui/oathModal.js';
@@ -1108,6 +1112,8 @@ class GameApp {
           this.renderer.triggerHitStop(130);
         }
         this.feelFX.pulseDamageVignette(0.35);
+        // Phase 4 (workstream 3): epic moment — suggest saving the last 30s.
+        if (this.clipUI) this.clipUI.suggestClip('boss');
       };
     }
     // New loot on the floor: rarity-colored light pillar.
@@ -1121,7 +1127,31 @@ class GameApp {
           if (!Number.isNaN(parsed)) color = parsed;
         } else if (l.type === 'treasure_chest') color = 0xd4af37;
         this.feelFX.lootBeam(l.x, l.z, color, l.type === 'treasure_chest' ? 1.4 : 1.0);
+        // Phase 4 (workstream 3): legendary+ drop — suggest saving a clip.
+        const rarity = String(l.itemData?.rarity || l.itemData?.rarityName || '').toLowerCase();
+        if ((rarity === 'legendary' || rarity === 'mythic') && this.clipUI) {
+          this.clipUI.suggestClip(rarity);
+        }
       };
+    }
+    // Phase 4 (workstream 3): one-tap 30s gameplay clips. The recorder keeps
+    // a rolling 30s ring buffer (canvas.captureStream + MediaRecorder, chunks
+    // timestamped, older than the window evicted). Capture resolution/fps
+    // follows the Phase 3 PerformanceMonitor tier; buffering pauses when the
+    // tab is hidden. Local-only until the player downloads or shares.
+    try {
+      this.clipRecorder = new ClipRecorder({ perfMonitor: this.perfMonitor });
+      if (this.renderer && this.renderer.renderer &&
+          this.clipRecorder.attach(this.renderer.renderer.domElement)) {
+        this.clipRecorder.start();
+      }
+      this.clipUI = initClipButton({
+        recorder: this.clipRecorder,
+        isInGame: () => this.gameState === 'dungeon',
+        toast: (text, kind) => { if (this.ui && this.ui.hud) this.ui.hud.toast(text, kind); },
+      });
+    } catch (err) {
+      console.warn('[Phase4] Clip capture unavailable:', err);
     }
   }
 
@@ -1861,6 +1891,10 @@ class GameApp {
     let localMesh = this.entities.playerMeshes.get(this.localPlayerId);
     const followPos = localMesh ? localMesh.position : null;
     this.renderer.update(rawDt, followPos);
+
+    // Phase 4 (workstream 3): feed the clip recorder one frame copy (cheap
+    // downscaled blit, frame-skipped internally to the capture profile fps).
+    if (this.clipRecorder) this.clipRecorder.captureTick();
 
     // Phase 3: feed the performance monitor (drives bloom auto-degrade).
     if (this.perfMonitor) {
