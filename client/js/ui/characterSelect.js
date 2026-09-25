@@ -13,6 +13,9 @@ const CLASS_OATHS = {
   mage: '“The elements answer — and I never ask twice.”',
   ranger: '“One shot. One silence. One less shadow.”',
   necromancer: '“Death is merely a change of allegiance.”',
+  plaguecaller: '“Breathe deep. The rot does the rest.”',
+  gravewarden: '“The line holds because I am the line.”',
+  hexblade: '“My blade remembers every shadow it has drunk.”',
 };
 
 const ROLE_ACCENTS = {

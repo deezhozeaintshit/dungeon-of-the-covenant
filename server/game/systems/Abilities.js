@@ -134,7 +134,8 @@ function getRank(player, abilityId) {
 }
 
 function isEligible(player, ability) {
-  return ability.classes.includes(player.classKey);
+  return ability.classes.includes(player.classKey) ||
+    ability.classes.includes(familyOf(player.classKey));
 }
 
 function isMaxed(player, ability) {
@@ -294,7 +295,19 @@ function getPlayerBuild(playerId) {
 }
 
 // Full tree definition for a class (client skill-tree panel bootstrap).
+// Phase 3 unlockable classes inherit their ability pool from a base class
+// family (defined in MetaProgression) — real abilities, no placeholders.
+function familyOf(classKey) {
+  const fam = {
+    plaguecaller: 'necromancer',
+    gravewarden: 'juggernaut',
+    hexblade: 'rogue'
+  };
+  return fam[classKey] || classKey;
+}
+
 function getTreeForClass(classKey) {
+  const fam = familyOf(classKey);
   return {
     branches: Object.values(BRANCHES),
     abilities: ABILITIES.map(a => ({
@@ -304,7 +317,7 @@ function getTreeForClass(classKey) {
       description: a.description,
       branch: a.branch,
       maxRanks: a.maxRanks,
-      eligible: a.classes.includes(classKey)
+      eligible: a.classes.includes(classKey) || a.classes.includes(fam)
     }))
   };
 }
