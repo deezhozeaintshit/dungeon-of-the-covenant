@@ -26,7 +26,7 @@ import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
 // animation (Mixamo clips + procedural fallback), progression UI
 // (level-up choices, skill tree, death-respawn), and oath shrines.
 import { EnemyVisuals } from './enemies.js';
-import { loadClipSet } from './animation/MixamoRig.js';
+// (Mixamo clip binding moved to entities.js _bindHeroClipSet.)
 import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
 import { initOathModal } from './ui/oathModal.js';
 
@@ -1387,25 +1387,8 @@ class GameApp {
     // 1. Sync Players
     this.entities.syncPlayers(snap.players, this.localPlayerId);
 
-    // Phase 2 (workstream 2): bind the Mixamo clip set to the local hero once
-    // its group exists. Procedural fallback drives the animator until then.
-    if (!this._clipSetBound) {
-      const localMesh = this.entities.playerMeshes.get(this.localPlayerId);
-      if (localMesh && localMesh.userData.animator) {
-        this._clipSetBound = 'loading';
-        (async () => {
-          try {
-            const set = await loadClipSet(`hero_${this.selectedClass || 'mage'}`, localMesh);
-            localMesh.userData.animator.bindClipSet(set);
-            localMesh.userData.animator.refresh();
-            this._clipSetBound = true;
-          } catch (err) {
-            console.warn('[Phase2] clip set load failed; procedural fallback active:', err);
-            this._clipSetBound = false; // retry on the next snapshot
-          }
-        })();
-      }
-    }
+    // Phase 2 (workstream 2): Mixamo clip binding now lives in
+    // entities.js _bindHeroClipSet (all heroes, local + remote).
 
     // 2. Sync Mobs
     this.entities.syncMobs(snap.mobs);

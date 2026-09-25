@@ -14,6 +14,11 @@
 // Dropped into the models dir (default 'assets/models/' relative to client/).
 // Missing files are simply skipped — the animator falls back to procedural.
 //
+// Two extensions (2026-09-25):
+//   opts.statePrefixes   = { attack: 'hero_rogue' }  per-state alt prefix
+//   opts.fallbackPrefixes = ['hero']                  shared set when the
+//        class-specific file is missing (hero_<class>_* -> hero_*.fbx)
+//
 // Retargeting: Mixamo FBX clips are authored against the Mixamo skeleton
 // (mixamorigHips, mixamorigLeftArm, ...). retargetClip() rewrites every track
 // to the TARGET rig's bone names via canonical-name matching with fallbacks:
@@ -40,6 +45,19 @@ import {
 export const CLIP_STATES = [
   'idle', 'walk', 'run', 'attack', 'hit', 'death', 'cast', 'jump', 'victory'
 ];
+
+// Class-specific clip variants (2026-09-25 Mixamo drop). Keys are hero class
+// keys; values map state -> alternate file prefix. States not listed fall
+// through to the shared `hero_<state>.fbx` set via fallbackPrefixes.
+//   rogue attack    <- Stabbing              (fast striker, not a 2H swing)
+//   mage cast       <- Standing 2H Cast Spell (signature two-handed channel)
+//   juggernaut idle <- Great Sword Idle      (heavy weapon rest pose)
+//   juggernaut jump <- Great Sword Jump Attack (leaping slam)
+export const HERO_STATE_PREFIX_OVERRIDES = {
+  rogue:      { attack: 'hero_rogue' },
+  mage:       { cast: 'hero_mage' },
+  juggernaut: { idle: 'hero_juggernaut', jump: 'hero_juggernaut' }
+};
 
 const _config = {
   basePath: 'assets/models/',   // relative to client/ (served root)
@@ -281,9 +299,13 @@ export class MixamoClipSet {
   }
 
   candidateUrls(state) {
+    return this.candidateUrlsFor(this.prefix, state);
+  }
+
+  candidateUrlsFor(prefix, state) {
     const variants = this.opts.fileVariants || _config.fileVariants;
     const base = this.opts.basePath || _config.basePath;
-    return variants.map((fn) => base + fn(this.prefix, state));
+    return variants.map((fn) => base + fn(prefix, state));
   }
 
   async _tryLoad(url) {
@@ -297,19 +319,32 @@ export class MixamoClipSet {
     return null;
   }
 
+  // Prefix resolution order for a state:
+  //   1. opts.statePrefixes[state]  (e.g. { attack: 'hero_rogue' })
+  //   2. this.prefix                (e.g. 'hero_mage')
+  //   3. opts.fallbackPrefixes[]    (e.g. ['hero'] — the shared hero set)
+  // First prefix with a loadable file wins; the rest are skipped silently.
   async loadState(state) {
-    const urls = this.candidateUrls(state);
-    for (const url of urls) {
-      try {
-        const clip = await this._tryLoad(url);
-        if (clip) {
-          clip.name = `${this.prefix}_${state}`;
-          const final = this.target ? (retargetClip(clip, this.target, this.opts) || clip) : clip;
-          this.clips.set(state, final);
-          return final;
+    const prefixes = [];
+    const sp = (this.opts.statePrefixes || {})[state];
+    if (sp) prefixes.push(sp);
+    prefixes.push(this.prefix);
+    for (const fb of (this.opts.fallbackPrefixes || [])) {
+      if (!prefixes.includes(fb)) prefixes.push(fb);
+    }
+    for (const pre of prefixes) {
+      for (const url of this.candidateUrlsFor(pre, state)) {
+        try {
+          const clip = await this._tryLoad(url);
+          if (clip) {
+            clip.name = `${pre}_${state}`;
+            const final = this.target ? (retargetClip(clip, this.target, this.opts) || clip) : clip;
+            this.clips.set(state, final);
+            return final;
+          }
+        } catch (e) {
+          // 404 / parse error -> try next variant, then next prefix.
         }
-      } catch (e) {
-        // 404 / parse error -> try next variant, then give up quietly.
       }
     }
     if (!this.missing.includes(state)) this.missing.push(state);

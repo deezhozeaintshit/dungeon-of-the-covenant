@@ -7,6 +7,7 @@ import { ensureCombatAnimState, triggerHitFlash, triggerAttackLunge, triggerDeat
 import { enableCharacterLightLayer, attachBlobShadow, updateCharacterLighting } from './characterLighting.js?v=9.0';
 // Phase 2 (workstream 2): game-wide animation state machine (Mixamo clips + procedural fallback).
 import { createAnimator } from './animation/AnimationStates.js';
+import { loadClipSet, HERO_STATE_PREFIX_OVERRIDES } from './animation/MixamoRig.js';
 
 export class EntityManager {
   constructor(scene) {
@@ -43,10 +44,35 @@ export class EntityManager {
     attachBlobShadow(group, shadowRadius, shadowOpacity);
     ensureCombatAnimState(group);
     // Phase 2: attach the game-wide animation state machine. The Mixamo clip
-    // set is bound later in main.js boot (bindClipSet); until then the
+    // set is bound by _bindHeroClipSet (local + remote heroes); until then the
     // animator drives procedural fallback poses.
     group.userData.animator = createAnimator(group);
     return group;
+  }
+
+  // Phase 2 (2026-09-25 Mixamo drop): bind the hero clip set to a player
+  // group. Class-specific files (hero_rogue_attack.fbx, ...) win per
+  // HERO_STATE_PREFIX_OVERRIDES; everything else falls back to the shared
+  // hero_<state>.fbx set; missing states stay procedural. Never throws —
+  // _clipSetBound=false triggers a retry on the next syncPlayers pass.
+  _bindHeroClipSet(group, classKey) {
+    const animator = group.userData.animator;
+    if (!animator || group.userData._clipSetBound === 'loading' || group.userData._clipSetBound === true) return;
+    group.userData._clipSetBound = 'loading';
+    (async () => {
+      try {
+        const set = await loadClipSet(`hero_${classKey || 'mage'}`, group, {
+          fallbackPrefixes: ['hero'],
+          statePrefixes: HERO_STATE_PREFIX_OVERRIDES[classKey] || {}
+        });
+        animator.bindClipSet(set);
+        animator.refresh();
+        group.userData._clipSetBound = true;
+      } catch (err) {
+        console.warn('[Phase2] hero clip set failed; procedural fallback active:', err);
+        group.userData._clipSetBound = false;
+      }
+    })();
   }
 
   attachEntityGLB(targetParent, url, scale = 0.75, offsetY = 0) {
@@ -136,6 +162,11 @@ export class EntityManager {
         group = this.createArticulatedPlayerMesh(p, isLocal);
         this.playerMeshes.set(p.id, group);
         this.scene.add(group);
+        // Phase 2: Mixamo clip set for every hero (local + remote).
+        this._bindHeroClipSet(group, p.classKey || 'juggernaut');
+      } else if (group.userData._clipSetBound === false) {
+        // Earlier bind failed — retry now that we're syncing again.
+        this._bindHeroClipSet(group, p.classKey || 'juggernaut');
       }
 
       // Smooth position lerp (including vertical Jump height p.y!)

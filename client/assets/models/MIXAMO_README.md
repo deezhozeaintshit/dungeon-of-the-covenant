@@ -129,3 +129,44 @@ game's rigs by canonical bone-name matching. For the game's pivot rigs
 Mixamo centimeters to game units, made relative to the bind pose, and planar
 root motion is stripped (the game moves the group; the clip keeps the vertical
 bob). Tune via `configureMixamo({ rootMotion, positionMode, positionScale })`.
+
+## 6. Delivered 2026-09-25 — shared hero set + class variants (WIRED)
+
+Fourteen Mixamo clips were delivered, renamed to the convention, and wired
+into the game. `entities.js _bindHeroClipSet()` binds a clip set for EVERY
+hero (local + remote players) with this resolution order per state:
+
+1. `opts.statePrefixes[state]` — class-specific variant
+2. `hero_<class>_<state>.fbx` — class-specific file (none shipped yet)
+3. `hero_<state>.fbx` — the shared hero set below
+
+Shared set (all six hero classes):
+
+| File | Mixamo source | State |
+|------|---------------|-------|
+| `hero_idle.fbx` | Breathing Idle | idle |
+| `hero_walk.fbx` | Walking | walk |
+| `hero_run.fbx` | Running | run |
+| `hero_attack.fbx` | Great Sword Slash | attack |
+| `hero_hit.fbx` | Hit Reaction | hit |
+| `hero_death.fbx` | Death | death |
+| `hero_cast.fbx` | Magic Spell Casting | cast |
+| `hero_jump.fbx` | Jump | jump |
+
+Class variants (`HERO_STATE_PREFIX_OVERRIDES` in `client/js/animation/MixamoRig.js`):
+
+| File | Mixamo source | Override |
+|------|---------------|----------|
+| `hero_rogue_attack.fbx` | Stabbing | rogue attack (fast striker, not a 2H swing) |
+| `hero_mage_cast.fbx` | Standing 2H Cast Spell 01 | mage cast (two-handed channel) |
+| `hero_juggernaut_idle.fbx` | Great Sword Idle | juggernaut idle (heavy weapon rest pose) |
+| `hero_juggernaut_jump.fbx` | Great Sword Jump Attack | juggernaut jump (leaping slam) |
+
+Ready alternates (committed, not auto-discovered — rename to swap in):
+
+| File | Mixamo source | Swap target |
+|------|---------------|-------------|
+| `hero_idle_alt03.fbx` | Standing Idle 03 | `hero_idle.fbx` |
+| `hero_death_alt_swordshield.fbx` | Sword And Shield Death | `hero_death.fbx` |
+
+States with no clip (`victory`, `downed`) stay procedural — by design.
