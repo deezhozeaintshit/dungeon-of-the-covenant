@@ -442,33 +442,6 @@
     </div>
   </div>
 
-  <!-- ============ NEED / GREED ============ -->
-  <div id="need-greed-modal" class="modal-overlay hidden">
-    <div class="need-greed-card">
-      <button id="btn-close-need-greed" class="card-x" title="Close Loot Roll (Esc)">✖</button>
-      <div class="loot-glow" aria-hidden="true"></div>
-      <span class="loot-rarity-badge">LEGENDARY DROP</span>
-      <h2 id="loot-item-name" class="loot-item-name">Malakor's Molten Great-Relic</h2>
-      <p class="loot-timer">Roll expires in <span id="roll-countdown">10</span>s</p>
-
-      <div class="need-greed-buttons">
-        <button id="btn-roll-need" class="btn roll-btn need">
-          <span class="roll-icon">🔥</span> NEED
-        </button>
-        <button id="btn-roll-greed" class="btn roll-btn greed">
-          <span class="roll-icon">💰</span> GREED
-        </button>
-        <button id="btn-roll-pass" class="btn roll-btn pass">
-          <span class="roll-icon">✖️</span> PASS
-        </button>
-      </div>
-
-      <div class="roll-results-stream" id="roll-results-stream">
-        <!-- Live dice rolls from party members -->
-      </div>
-    </div>
-  </div>
-
   <!-- ============ VICTORY PODIUM ============ -->
   <div id="victory-screen" class="ui-screen hidden">
     <div class="victory-container">
@@ -603,36 +576,26 @@
       </div>
 
       <div class="emporium-stripe-head">
-        <h3 class="emporium-h green">💳 STRIPE LIVE ARMORY &amp; TREASURY BUNDLES</h3>
-        <span id="stripe-mode-badge">🔒 STRIPE .ENV CONNECTED</span>
+        <h3 class="emporium-h green">💎 COVENANT COSMETIC SHOP</h3>
+        <span id="stripe-mode-badge" class="shop-mode-badge">💳 Secure checkout by Stripe</span>
       </div>
 
-      <div class="iap-grid">
-        <div class="iap-card iap-starter">
-          <div>
-            <div class="iap-name">🔥 Vanguard Starter Pack</div>
-            <div class="iap-desc">• +500 Soul Shards (💎) + 3D Infernal Crown</div>
-            <div class="iap-gear">• Equips: Hellfire Great-Blade (GS 680: +45 ATK, +180 HP, +15% CRIT)</div>
-          </div>
-          <button id="btn-iap-starter" class="btn-sm iap-btn">Purchase &amp; Equip — $2.99</button>
-        </div>
-        <div class="iap-card iap-founder">
-          <div>
-            <div class="iap-name">👑 Founder's Sovereign Pass</div>
-            <div class="iap-desc">• +1,500 Shards + 3D Seraph Wings + All Blessings +1</div>
-            <div class="iap-gear">• Equips: Sovereign Relic-Blade (GS 1150: +85 ATK, +350 HP, +25% CRIT)</div>
-          </div>
-          <button id="btn-iap-founder" class="btn-sm iap-btn">Purchase &amp; Equip — $6.99</button>
-        </div>
-        <div class="iap-card iap-mythic">
-          <div>
-            <div class="iap-name">⚔️ Mythic 3D Arsenal Bundle</div>
-            <div class="iap-desc">• +3,500 Shards + All 4 3D Auras + All Blessings +2</div>
-            <div class="iap-gear">• Equips: Malakor's Godslayer Scythe (GS 1650: +140 ATK, +600 HP, +35% CRIT)</div>
-          </div>
-          <button id="btn-iap-mythic-bundle" class="btn-sm iap-btn">Purchase &amp; Equip — $9.99</button>
-        </div>
+      <!-- Cosmetics only — never pay-to-win. This banner is a standing promise:
+           nothing sold here changes stats, XP, loot, or power in any way. -->
+      <p class="shop-fairness-banner" role="note">
+        <strong>🎨 COSMETICS ONLY — NEVER PAY-TO-WIN.</strong>
+        Skins, weapon glows, and emotes change how your hero <em>looks</em>, never how
+        strong they are. No stats. No XP boosts. No loot luck. Everyone sees your style.
+      </p>
+      <p id="cosmetic-shop-status" class="shop-status" role="status" aria-live="polite"></p>
+
+      <div id="cosmetic-shop-coming-soon" class="shop-coming-soon hidden">
+        <div class="coming-soon-icon" aria-hidden="true">🛠️</div>
+        <h4>Cosmetic Shop — Coming Soon</h4>
+        <p>Hero skins, weapon glows, and emotes are on the way. The dungeon is fully playable right now — no purchase needed, ever.</p>
       </div>
+
+      <div id="cosmetic-shop-grid" class="cosmetic-shop-grid" aria-label="Cosmetic shop products"></div>
     </div>
   </div>
 

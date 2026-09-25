@@ -70,18 +70,18 @@ export class NetworkClient {
     }
   }
 
-  quickplayMatchmaking(playerName, chosenClass, profile = null) {
-    this.send({ type: 'quickplay_matchmaking', playerName, chosenClass, profile });
+  quickplayMatchmaking(playerName, chosenClass, profile = null, accountToken = null) {
+    this.send({ type: 'quickplay_matchmaking', playerName, chosenClass, profile, accountToken });
   }
 
-  createRoom(playerName, chosenClass, profile = null) {
-    this.send({ type: 'create_room', playerName, chosenClass, profile });
+  createRoom(playerName, chosenClass, profile = null, accountToken = null) {
+    this.send({ type: 'create_room', playerName, chosenClass, profile, accountToken });
   }
 
   // Phase 2: private (invite-only) chamber — excluded from room_list and
   // skipped by quickplay matchmaking.
-  createPrivateRoom(playerName, chosenClass, profile = null) {
-    this.send({ type: 'create_private_room', playerName, chosenClass, profile });
+  createPrivateRoom(playerName, chosenClass, profile = null, accountToken = null) {
+    this.send({ type: 'create_private_room', playerName, chosenClass, profile, accountToken });
   }
 
   // Phase 2: ask the server for the public lobby browser list.
@@ -89,8 +89,8 @@ export class NetworkClient {
     this.send({ type: 'list_rooms' });
   }
 
-  joinRoom(roomCode, playerName, chosenClass, profile = null) {
-    this.send({ type: 'join_room', roomCode, playerName, chosenClass, profile });
+  joinRoom(roomCode, playerName, chosenClass, profile = null, accountToken = null) {
+    this.send({ type: 'join_room', roomCode, playerName, chosenClass, profile, accountToken });
   }
 
   startGame() {
@@ -105,8 +105,14 @@ export class NetworkClient {
     this.send({ type: 'use_horn' });
   }
 
-  submitLootRoll(choice) {
-    this.send({ type: 'loot_roll', choice });
+  // Phase 3 gear: only the itemId (equip) or slot (unequip) is sent.
+  // Stats are never sent — the server validates and recomputes everything.
+  equipItem(itemId) {
+    this.send({ type: 'gear_equip', itemId });
+  }
+
+  unequipItem(slot) {
+    this.send({ type: 'gear_unequip', slot });
   }
 
   handleMessage(msg) {

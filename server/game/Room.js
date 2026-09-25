@@ -9,10 +9,19 @@ const LootGenerator = require('./LootGenerator');
 const Health = require('./systems/Health');
 const Progression = require('./systems/Progression');
 const Abilities = require('./systems/Abilities');
+// Phase 3 loot & gear (workstream 2) — server-authoritative inventory/equip
+const Gear = require('./systems/Gear');
+// Phase 3 meta-progression (workstream 5) — persistent account XP, covenant
+// ranks, unlockable classes/boons/stash tabs. Server-authoritative.
+const MetaProgression = require('./systems/MetaProgression');
 // Phase 2 objectives (workstream 5) — exports { Objectives, ... }
 const { Objectives } = require('./systems/Objectives');
 // Phase 2 signature features (workstream 6)
 const Oaths = require('./systems/Oaths');
+// Phase 3 cosmetic shop (workstream 6) — server-side ownership validation for
+// skin / weapon-glow equips and emotes. Cosmetics are visual only.
+const authService = require('../authService');
+const catalog = require('../cosmeticsCatalog');
 const LivingDungeon = require('./systems/LivingDungeon');
 const Nemesis = require('./systems/Nemesis');
 // Phase 2 enemies + logic (workstream 1) — EnemyBrain exports { EnemyBrain, STATES }
@@ -37,6 +46,9 @@ const CLASS_CONFIGS = {
   ranger: { name: 'Deadeye', role: 'Ranger', maxHp: 400, speed: 5.2, attackRange: 11.0, color: 0x44aa44 },
   necromancer: { name: 'Dreadweaver', role: 'Necromancer', maxHp: 420, speed: 4.6, attackRange: 8.5, color: 0x228855 }
 };
+// Phase 3 meta-progression: unlockable hero classes (single source of truth
+// for stats lives in systems/MetaProgression.js).
+Object.assign(CLASS_CONFIGS, MetaProgression.EXTRA_CLASS_CONFIGS);
 
 class Room {
   constructor(roomCode, hostSocket = null) {
@@ -64,7 +76,6 @@ class Room {
     this.lastStandHeroId = null;
 
     // Need/Greed roll state
-    this.activeRoll = null; // { itemId, itemName, rollExpiresAt, votes: {} }
 
     // Stats & Scoring
     this.totalGoldDropped = 0;
@@ -84,6 +95,7 @@ class Room {
       abilities: Abilities,
       objectives: null, // set per floor by Objectives.createForRoom
       oaths: Oaths,
+      metaProgression: MetaProgression, // Phase 3: persistent account ranks/unlocks
       livingDungeon: LivingDungeon,
       nemesis: Nemesis
     };
@@ -93,8 +105,26 @@ class Room {
     this.shrines = this.shrines || [];
   }
 
-  addPlayer(socketId, name, chosenClass = 'juggernaut', isBot = false, profile = null) {
-    const classInfo = CLASS_CONFIGS[chosenClass] || CLASS_CONFIGS.juggernaut;
+  addPlayer(socketId, name, chosenClass = 'juggernaut', isBot = false, profile = null, accountToken = null) {
+    // Phase 3 meta-progression: resolve the SERVER-SIDE account from the join
+    // token. Unlocks (classes, boons) are read from the server record — the
+    // client-supplied profile blob is display data only and never trusted.
+    let serverProfile = null;
+    let accountUsername = null;
+    if (!isBot && accountToken) {
+      const acc = authService.getAccountByToken(accountToken);
+      if (acc) { serverProfile = acc.profile; accountUsername = acc.username; }
+    }
+
+    // Locked hero classes (purchased in the Covenant Vault) fall back to
+    // Juggernaut when the account has not unlocked them. No exceptions.
+    let safeClass = chosenClass;
+    let classDenied = false;
+    if (!isBot && !MetaProgression.classAllowedFor(serverProfile, chosenClass)) {
+      safeClass = 'juggernaut';
+      classDenied = !!chosenClass && chosenClass !== 'juggernaut';
+    }
+    const classInfo = CLASS_CONFIGS[safeClass] || CLASS_CONFIGS.juggernaut;
     const mightRank = profile?.mightRank || 0;
     const vitalityRank = profile?.vitalityRank || 0;
     const hasteRank = profile?.hasteRank || 0;
@@ -105,9 +135,17 @@ class Room {
     const player = {
       id: socketId,
       name: name || `Hero_${Math.floor(100 + Math.random() * 900)}`,
+      // Phase 3 meta-progression: server-resolved account link. Bots and
+      // guests have none — only linked accounts earn account XP.
+      accountUsername,
       title: profile?.title || (isBot ? 'Covenant Vanguard' : 'Soul-Sworn'),
       cosmeticAura: profile?.cosmeticAura || defaultBotAura,
-      classKey: chosenClass,
+      // Phase 3 cosmetic shop: equipped hero skin + weapon glow (visual only,
+      // broadcast to every client so the party sees your cosmetics).
+      equippedSkin: profile?.equippedSkin || null,
+      equippedWeaponGlow: profile?.equippedWeaponGlow || null,
+      emoteCooldownUntil: 0,
+      classKey: safeClass,
       role: classInfo.role,
       x: 0 + (Object.keys(this.players).length * 1.5 - 2.5),
       y: 0,
@@ -189,6 +227,29 @@ class Room {
     Health.initPlayer(player);
     Progression.initPlayer(player);
     Abilities.initPlayer(player);
+    // Phase 3: server-authoritative loot inventory + equipment init
+    Gear.initPlayer(player);
+    Gear.sendInventoryUpdate(this, player);
+
+    // Phase 3 meta-progression: apply the account's equipped starting boons
+    // (resolved from the server-side account record, never the client blob).
+    if (serverProfile) {
+      const applied = MetaProgression.applyStartBoons(this, player, serverProfile);
+      if (applied.length > 0) {
+        this.broadcast({
+          type: 'floating_text',
+          text: `✨ COVENANT BOONS: ${applied.map(id => MetaProgression.UNLOCKABLES.find(u => u.boonId === id)?.name || id).join(' + ')}`,
+          x: player.x, z: player.z, style: 'combo'
+        });
+      }
+    }
+    if (classDenied) {
+      this.broadcast({
+        type: 'class_choice_denied',
+        playerId: socketId,
+        reason: `The ${CLASS_CONFIGS[chosenClass]?.name || chosenClass} is sealed in the Covenant Vault — claim it there first. You march as a Juggernaut.`
+      });
+    }
 
     return player;
   }
@@ -631,7 +692,23 @@ class Room {
 
     // Live Cosmetic Aura & Title Equip from Covenant Emporium
     if (inputData.equipCosmetic) {
-      player.cosmeticAura = inputData.equipCosmetic.aura || null;
+      const ec = inputData.equipCosmetic;
+      // Phase 3 cosmetic shop equips are validated against the account's
+      // persisted entitlements — the client cannot equip what it has not bought.
+      const entitlements = authService.getEntitlements(inputData.accountToken);
+      if (ec.aura !== undefined) {
+        player.cosmeticAura = ec.aura || null;
+      }
+      if (ec.skin !== undefined) {
+        if (ec.skin === null || (entitlements && entitlements.ownedSkins.includes(ec.skin))) {
+          player.equippedSkin = ec.skin;
+        }
+      }
+      if (ec.weaponGlow !== undefined) {
+        if (ec.weaponGlow === null || (entitlements && entitlements.ownedWeaponGlows.includes(ec.weaponGlow))) {
+          player.equippedWeaponGlow = ec.weaponGlow;
+        }
+      }
       if (inputData.equipCosmetic.title) player.title = inputData.equipCosmetic.title;
       this.broadcast({
         type: 'floating_text',
@@ -640,6 +717,19 @@ class Room {
         z: player.z,
         style: 'combo'
       });
+    }
+
+    // Phase 3 cosmetic shop: emotes. Ownership-validated, rate-limited, and
+    // rebroadcast so every party member sees the emote animation.
+    if (inputData.emote) {
+      const emoteId = String(inputData.emote);
+      const entitlements = authService.getEntitlements(inputData.accountToken);
+      const owned = entitlements && entitlements.ownedEmotes.includes(emoteId);
+      const now = Date.now();
+      if (owned && now >= (player.emoteCooldownUntil || 0)) {
+        player.emoteCooldownUntil = now + 3000; // 3s anti-spam cooldown
+        this.broadcast({ type: 'player_emote', playerId: player.id, emote: emoteId });
+      }
     }
 
     // Live Permanent Soul-Tree Blessing Upgrade from Covenant Emporium
@@ -661,9 +751,9 @@ class Room {
       });
     }
 
-    if (inputData.equipIAPItem && typeof this.equipProceduralItem === 'function') {
-      this.equipProceduralItem(player, inputData.equipIAPItem);
-    }
+    // NOTE: the old client-driven `equipIAPItem` purchase path was removed:
+    // the shop is cosmetics-only and stat items are never granted. Any
+    // equipIAPItem input is ignored.
   }
 
   handleForgeUpgrade(player, upgradeType) {
@@ -1477,10 +1567,6 @@ class Room {
     // 7. Check Floor Loot Pickup
     this.updateFloorLoot();
 
-    // 8. Check Need/Greed Roll Timer
-    if (this.activeRoll) {
-      this.updateRoll(dt);
-    }
 
     // 9. Check Victory or Defeat
     this.checkEndConditions();
@@ -2159,38 +2245,22 @@ class Room {
     }
   }
 
+  // Phase 3: legacy entry point kept for the profile-restore path.
+  // Routes through systems/Gear.js so stats are sanitized, validated, and
+  // recomputed server-side — client-sent item objects are never trusted.
+  // There is intentionally no IAP grant branch: stat items are never sold.
   equipProceduralItem(player, item) {
     if (!player || !item) return;
-    const s = item.stats || {};
-    if (s.damageBuff) player.damageBuff = +(player.damageBuff + s.damageBuff).toFixed(2);
-    if (s.maxHp) {
-      Health.setMaxHp(this, player.id, player.maxHp + s.maxHp);
-    }
-    if (s.critChance) player.critChance = +((player.critChance || 0.18) + s.critChance).toFixed(2);
-    if (s.lifesteal) player.lifesteal = +((player.lifesteal || 0) + s.lifesteal).toFixed(2);
-    if (s.cooldownHaste) player.cooldownHaste = +((player.cooldownHaste || 1.0) + s.cooldownHaste).toFixed(2);
+    Gear.grantAndEquip(this, player, item);
+  }
 
-    if (item.slot === 'weapon') {
-      player.equipment.weapon = `${item.name} (${item.summary})`;
-    } else if (item.slot === 'armor') {
-      player.equipment.armor = `${item.name} (${item.summary})`;
-    } else {
-      player.equipment.relics.push(`${item.name} (${item.summary})`);
-    }
+  // Phase 3: thin wrappers for the gear_equip / gear_unequip messages.
+  handleGearEquip(playerId, itemId) {
+    return Gear.equip(this, playerId, itemId);
+  }
 
-    this.broadcast({
-      type: 'dynamic_loot_equipped',
-      playerId: player.id,
-      playerName: player.name,
-      item
-    });
-    this.broadcast({
-      type: 'floating_text',
-      text: `⚔️ [${item.rarityName.toUpperCase()}] ${item.name} (${item.summary})`,
-      x: player.x,
-      z: player.z,
-      style: 'combo'
-    });
+  handleGearUnequip(playerId, slot) {
+    return Gear.unequip(this, playerId, slot);
   }
 
   updateFloorLoot() {
@@ -2217,7 +2287,7 @@ class Room {
         const pickupRadius = (loot.type === 'shrine_blood' || loot.type === 'shrine_arcane') ? 3.2 : 2.85;
         const distAfterMagnet = Math.hypot(p.x - loot.x, p.z - loot.z);
         if (distAfterMagnet <= pickupRadius) {
-          loot.pickedUp = true;
+          let consumed = true;
           if (loot.type === 'gold') {
             // Phase 2: Silent Coin doubles gold (modifyGoldPickup).
             const goldAmt = this.systems?.oaths?.modifyGoldPickup(p, loot.value) ?? loot.value;
@@ -2244,14 +2314,39 @@ class Room {
             });
             this.broadcast({ type: 'floating_text', text: '+50% HP ELIXIR', x: p.x, z: p.z, style: 'heal' });
           } else if (loot.type === 'gear_drop') {
+            // Phase 3: gear goes to INVENTORY, not straight into stats.
+            // Pickup is server-decided; equip happens via explicit request.
             const item = loot.itemData || LootGenerator.generateItem(this.floor, 'mob');
-            this.equipProceduralItem(p, item);
+            const pickup = Gear.addToInventory(this, p, item, 'drop');
+            if (pickup.ok) {
+              this.broadcast({
+                type: 'floating_text',
+                text: `📦 [${String(pickup.item.rarityName).toUpperCase()}] ${pickup.item.name} → INVENTORY (press I)`,
+                x: p.x,
+                z: p.z,
+                style: 'combo'
+              });
+            } else {
+              consumed = false; // inventory full — leave it on the ground
+              this.broadcast({
+                type: 'floating_text',
+                text: `⚠️ ${pickup.reason}`,
+                x: p.x,
+                z: p.z,
+                style: 'crit'
+              });
+            }
           } else if (loot.type === 'treasure_chest') {
             p.stats.goldCollected += loot.value;
             this.totalGoldDropped += loot.value;
             Health.healPlayer(this, p.id, Math.round(p.maxHp * 0.35), 'Treasure Chest');
-            const chestItem = LootGenerator.generateItem(this.floor, 'chest');
-            this.equipProceduralItem(p, chestItem);
+            const chestBiome = (this.proceduralConfig && this.proceduralConfig.biome && this.proceduralConfig.biome.id) || 'ossuary_crypt';
+            const chestItem = LootGenerator.generateItem(this.floor, 'chest', chestBiome);
+            const chestPickup = Gear.addToInventory(this, p, chestItem, 'chest');
+            if (!chestPickup.ok) {
+              // Inventory full: drop the chest item on the ground instead of losing it.
+              this.spawnFloorLoot('gear_drop', loot.x, loot.z, chestItem.gearScore, chestItem.name, false, chestItem);
+            }
             this.spawnFloorLoot('gold', loot.x - 1.2, loot.z + 0.8, 35);
             this.spawnFloorLoot('gold', loot.x + 1.2, loot.z + 0.8, 35);
             this.broadcast({
@@ -2328,6 +2423,7 @@ class Room {
               tone: 'hype'
             });
           }
+          loot.pickedUp = consumed;
           break;
         }
       }
@@ -2367,9 +2463,13 @@ class Room {
     const goldDrop = isElite ? 150 : Math.floor(15 + Math.random() * 25);
     this.spawnFloorLoot('gold', entity.x, entity.z, goldDrop);
 
-    // Dynamic Procedural Gear Drop (100% on Boss/Elites, 50% on Mobs)
-    if (isBoss || isElite || Math.random() < 0.50) {
-      const dropItem = LootGenerator.generateItem(this.floor, isBoss ? 'boss' : (isElite ? 'elite' : 'mob'));
+    // Phase 3: server-authoritative gear drop. Drop chance AND rarity roll
+    // come from the biome drop table (LootGenerator.BIOME_LOOT); the client
+    // never participates in the roll.
+    const biomeId = (this.proceduralConfig && this.proceduralConfig.biome && this.proceduralConfig.biome.id) || 'ossuary_crypt';
+    const dropTier = isBoss ? 'boss' : (isElite ? 'elite' : 'trash');
+    if (LootGenerator.rollDropChance(dropTier, biomeId)) {
+      const dropItem = LootGenerator.generateItem(this.floor, isBoss ? 'boss' : (isElite ? 'elite' : 'mob'), biomeId);
       this.spawnFloorLoot('gear_drop', entity.x + 0.8, entity.z + 0.6, dropItem.gearScore, dropItem.name, true, dropItem);
     }
 
@@ -2479,130 +2579,16 @@ class Room {
     // Spawn Epic Chest at boss position (no random jitter so it stands squarely on the monument)
     this.spawnFloorLoot('epic_chest', this.boss.x, this.boss.z, 500, "Malakor's Molten Relic", false);
 
-    // Initiate Need/Greed Roll for the Epic Relic
-    this.startNeedGreedRoll("Malakor's Molten Great-Relic", 'legendary_hammer');
+    // Phase 3: the boss showers REAL gear. Boss tier = 100% drop chance
+    // with the biome's rarity bonus; these are server-issued items the
+    // party claims by walking over them (inventory -> equip).
+    const bossBiome = (this.proceduralConfig && this.proceduralConfig.biome && this.proceduralConfig.biome.id) || 'ossuary_crypt';
+    for (let i = 0; i < 3; i++) {
+      const bossItem = LootGenerator.generateItem(this.floor, 'boss', bossBiome);
+      this.spawnFloorLoot('gear_drop', this.boss.x + (i - 1) * 1.6, this.boss.z + 1.2, bossItem.gearScore, bossItem.name, false, bossItem);
+    }
 
     this.recordPotgCandidate('boss_kill', killer, `${killer ? killer.name : 'Party'} landed the decisive killing blow on Malakor!`);
-  }
-
-  startNeedGreedRoll(itemName, itemId) {
-    this.activeRoll = {
-      itemId,
-      itemName,
-      expiresAt: Date.now() + 10000,
-      rolls: {}, // socketId -> { choice: 'need'|'greed'|'pass', roll: number }
-      completed: false
-    };
-
-    this.broadcast({
-      type: 'start_need_greed',
-      itemName,
-      itemId,
-      duration: 10
-    });
-  }
-
-  submitRoll(socketId, choice) {
-    if (!this.activeRoll || this.activeRoll.completed) return;
-    const player = this.players[socketId];
-    if (!player) return;
-
-    const rollValue = Math.floor(1 + Math.random() * 100);
-    this.activeRoll.rolls[socketId] = {
-      choice, // 'need', 'greed', 'pass'
-      roll: rollValue,
-      playerName: player.name
-    };
-
-    this.broadcast({
-      type: 'roll_submitted',
-      playerId: socketId,
-      playerName: player.name,
-      choice,
-      roll: choice === 'pass' ? 0 : rollValue
-    });
-
-    // Have AI bots automatically cast Greed rolls
-    for (const bot of Object.values(this.players)) {
-      if (bot.isBot && !this.activeRoll.rolls[bot.id]) {
-        const botRoll = Math.floor(1 + Math.random() * 95);
-        this.activeRoll.rolls[bot.id] = {
-          choice: 'greed',
-          roll: botRoll,
-          playerName: bot.name
-        };
-        this.broadcast({
-          type: 'roll_submitted',
-          playerId: bot.id,
-          playerName: bot.name,
-          choice: 'greed',
-          roll: botRoll
-        });
-      }
-    }
-
-    // If all human players have rolled, resolve shortly!
-    const allHumansRolled = Object.values(this.players)
-      .filter(p => !p.isBot)
-      .every(p => Boolean(this.activeRoll.rolls[p.id]));
-    if (allHumansRolled) {
-      this.activeRoll.expiresAt = Math.min(this.activeRoll.expiresAt, Date.now() + 1200);
-    }
-  }
-
-  updateRoll(dt) {
-    if (!this.activeRoll || this.activeRoll.completed) return;
-
-    if (Date.now() >= this.activeRoll.expiresAt) {
-      this.resolveRoll();
-    }
-  }
-
-  resolveRoll() {
-    this.activeRoll.completed = true;
-    let winner = null;
-    let highestRoll = -1;
-    let highestCategory = 'none'; // 'need' beats 'greed'
-
-    for (const [id, r] of Object.entries(this.activeRoll.rolls)) {
-      if (r.choice === 'need') {
-        if (highestCategory !== 'need' || r.roll > highestRoll) {
-          highestCategory = 'need';
-          highestRoll = r.roll;
-          winner = { id, name: r.playerName, roll: r.roll, choice: 'Need' };
-        }
-      } else if (r.choice === 'greed' && highestCategory !== 'need') {
-        if (r.roll > highestRoll) {
-          highestCategory = 'greed';
-          highestRoll = r.roll;
-          winner = { id, name: r.playerName, roll: r.roll, choice: 'Greed' };
-        }
-      }
-    }
-
-    const winnerPlayer = winner ? this.players[winner.id] : null;
-
-    this.broadcast({
-      type: 'roll_result',
-      winnerName: winner ? winner.name : 'Nobody (Passed)',
-      winningRoll: highestRoll,
-      choice: highestCategory,
-      itemName: this.activeRoll.itemName
-    });
-
-    if (winnerPlayer) {
-      this.broadcast({
-        type: 'narrator_announcement',
-        text: `${winner.name} won ${this.activeRoll.itemName} with a roll of ${highestRoll}!`,
-        tone: 'loot'
-      });
-    }
-
-    // Transition to post-game summary after 2.5 seconds
-    setTimeout(() => {
-      this.state = 'victory';
-      this.generatePostGameSummary();
-    }, 2500);
   }
 
   generatePostGameSummary() {
@@ -2637,6 +2623,11 @@ class Room {
     const secretsScore = Object.values(this.players).filter(p => p.secretCompleted).length * 5000;
     const totalScore = 50000 + speedBonus + comboScore + secretsScore;
 
+    // Phase 3 meta-progression: grant persistent account XP / seals from this
+    // run's SERVER-OBSERVED results (kills, objectives, bosses, difficulty,
+    // victory). Computed entirely server-side — client totals are never read.
+    const metaRewards = MetaProgression.grantRunRewards(this, { victory: true });
+
     this.broadcast({
       type: 'run_completed',
       summary: {
@@ -2655,7 +2646,10 @@ class Room {
           secretCompleted: p.secretCompleted
         })),
         playOfTheGame: potg
-      }
+      },
+      // Phase 3: per-account progression earned this run (for the victory
+      // screen covenant panel). Empty for guests/bots.
+      meta: metaRewards
     });
   }
 
@@ -2678,6 +2672,12 @@ class Room {
         type: 'party_wipe',
         message: 'The dungeon claims your souls... Run Failed.'
       });
+      // Phase 3: the fallen still feed the covenant — reduced account XP for
+      // the attempt (server-observed only), so defeat is never a total loss.
+      const metaRewards = MetaProgression.grantRunRewards(this, { victory: false });
+      if (metaRewards.length > 0) {
+        this.broadcast({ type: 'meta_rewards', victory: false, rewards: metaRewards });
+      }
       this.broadcast({
         type: 'narrator_announcement',
         text: 'The torch flickers out. The dungeon consumes yet another expedition...',
@@ -2900,6 +2900,9 @@ class Room {
         name: p.name,
         title: p.title || 'Soul-Sworn',
         cosmeticAura: p.cosmeticAura || null,
+        // Phase 3 cosmetic shop (visual only) — every client renders these.
+        skinId: p.equippedSkin || null,
+        weaponGlow: p.equippedWeaponGlow || null,
         streakCount: p.streakCount || 0,
         overdrive: Boolean(p.overdrive),
         shardsEarned: p.stats.shardsEarned || 0,
@@ -2909,6 +2912,7 @@ class Room {
         // ability points, build). Later spreads win on level/xp/nextLevelXp.
         ...Health.snapshotFields(p),
         ...Progression.snapshotFields(p),
+        ...Gear.snapshotFields(p),
         gold: p.stats.goldCollected || 0,
         damageBuff: p.damageBuff || 1.0,
         lifesteal: p.lifesteal || 0,

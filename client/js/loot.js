@@ -1,35 +1,16 @@
-// loot.js - 3D Floor Loot, Interactive Shrines, Treasure Chests, Light Beams & Need/Greed Roll System
+// loot.js - 3D Floor Loot, Interactive Shrines, Treasure Chests, Light Beams.
+// Phase 3: the need/greed roll modal was removed — drops are decided and
+// validated entirely server-side (systems/Gear.js) and land in the player's
+// inventory, so contested rolls no longer fit the flow. This module renders
+// floor loot visuals only; inventory/equip UI lives in ui/inventory.js.
 import * as THREE from '/vendor/three.module.js';
 
 export class LootSystem {
-  constructor(scene, onRollSubmit) {
+  constructor(scene) {
     this.scene = scene;
-    this.onRollSubmit = onRollSubmit;
     this.lootMeshes = new Map();
-
-    this.modal = document.getElementById('need-greed-modal');
-    this.itemNameEl = document.getElementById('loot-item-name');
-    this.countdownEl = document.getElementById('roll-countdown');
-    this.rollStreamEl = document.getElementById('roll-results-stream');
-
-    this.initButtons();
-  }
-
-  initButtons() {
-    const needBtn = document.getElementById('btn-roll-need');
-    const greedBtn = document.getElementById('btn-roll-greed');
-    const passBtn = document.getElementById('btn-roll-pass');
-
-    const submit = (choice) => {
-      if (this.onRollSubmit) this.onRollSubmit(choice);
-      if (needBtn) needBtn.disabled = true;
-      if (greedBtn) greedBtn.disabled = true;
-      if (passBtn) passBtn.disabled = true;
-    };
-
-    if (needBtn) needBtn.addEventListener('click', () => submit('need'));
-    if (greedBtn) greedBtn.addEventListener('click', () => submit('greed'));
-    if (passBtn) passBtn.addEventListener('click', () => submit('pass'));
+    // Phase 3 game feel: fired once per newly-appeared floor drop (drop event).
+    this.onLootAdded = null;
   }
 
   // Sync 3D Floor Loot, Shrines & Chests
@@ -50,6 +31,10 @@ export class LootSystem {
         mesh = this.createLootMesh(l);
         this.lootMeshes.set(l.id, mesh);
         this.scene.add(mesh);
+        // Phase 3 game feel: new drop landed — loot beam pillar.
+        if (this.onLootAdded) {
+          try { this.onLootAdded(l); } catch (e) { /* VFX must never break sync */ }
+        }
       }
       mesh.position.set(l.x, 0.25, l.z);
     }
@@ -282,43 +267,6 @@ export class LootSystem {
     sprite.scale.set(3.8, 0.68, 1);
     sprite.position.y = yOffset;
     parent.add(sprite);
-  }
-
-  showNeedGreedModal(itemName, duration = 10) {
-    if (!this.modal) return;
-    if (this.itemNameEl) this.itemNameEl.innerText = itemName;
-    if (this.rollStreamEl) this.rollStreamEl.innerHTML = '';
-
-    ['btn-roll-need', 'btn-roll-greed', 'btn-roll-pass'].forEach(id => {
-      const b = document.getElementById(id);
-      if (b) b.disabled = false;
-    });
-
-    this.modal.classList.remove('hidden');
-
-    let remaining = duration;
-    if (this.countdownEl) this.countdownEl.innerText = remaining;
-
-    const timer = setInterval(() => {
-      remaining--;
-      if (this.countdownEl) this.countdownEl.innerText = remaining;
-      if (remaining <= 0) {
-        clearInterval(timer);
-      }
-    }, 1000);
-  }
-
-  addRollResult(playerName, choice, roll) {
-    if (!this.rollStreamEl) return;
-    const row = document.createElement('div');
-    row.style.margin = '4px 0';
-    const icon = choice === 'need' ? '🔥' : (choice === 'greed' ? '💰' : '✖️');
-    row.innerHTML = `<strong>${playerName}</strong> chose ${choice.toUpperCase()} ${icon} ${choice !== 'pass' ? `(Rolled: ${roll})` : ''}`;
-    this.rollStreamEl.appendChild(row);
-  }
-
-  hideNeedGreedModal() {
-    if (this.modal) this.modal.classList.add('hidden');
   }
 
   update(dt) {
