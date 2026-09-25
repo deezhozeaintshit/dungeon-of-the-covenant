@@ -1,0 +1,89 @@
+INTEGRATION — CHARACTERS TRACK (Dungeon of the Covenant)
+====================================================
+Date: 2026-09-25 | Track: 2a CHARACTERS | Author: characters build subagent
+
+WHAT WAS BUILT
+--------------
+Three new modules (client/js/) + wiring inside client/js/entities.js.
+All existing exported names/signatures kept (EntityManager, syncPlayers,
+syncMobs, syncBoss, triggerAttackAnimation, update, attachEntityGLB, ...).
+
+  characterMaterials.js  - PBR upgrade pass: procedural micro-detail + cloth-weave
+                           normal maps, per-kind tuning (metal/cloth/bone/glow),
+                           shared PMREM RoomEnvironment reflections applied to
+                           CHARACTER materials only (dungeon untouched).
+  characterAnimation.js  - Procedural combat layer: hit flash (hp-drop driven),
+                           attack lunge (root forward push), boss death
+                           tip-over + sink + fade, with reset.
+  characterLighting.js   - Rim/back light rig (one DirectionalLight on layer 1,
+                           repositioned opposite the camera every frame) +
+                           blob contact shadows (radial-gradient planes that
+                           stay flat when a hero tips over).
+
+COORDINATOR: ADD TO client/js/main.js
+--------------------------------------
+1. Import (top of file, next to the other imports):
+
+   import { initCharacterRimLight } from './characterLighting.js?v=9.0';
+
+2. Init calls — place immediately AFTER the EntityManager is constructed
+   (currently: `this.entities = new EntityManager(this.renderer.scene);`):
+
+   // characters track: rim light rig + PBR environment for characters
+   initCharacterRimLight(this.renderer.scene, this.renderer.camera);
+   this.renderer.camera.layers.enable(1);      // rim light lives on layer 1 only
+   this.entities.setRenderer(this.renderer.renderer); // char PBR env reflections
+
+   Notes:
+   - No per-frame main.js call is needed: EntityManager.update(dt) already
+     drives updateCharacterLighting() + updateCombatAnimation() internally.
+   - setRenderer() is safe to call once; groups built later pick up the env
+     map automatically, earlier groups are upgraded retroactively.
+   - The rim light affects ONLY character meshes (layer 1); the dungeon keeps
+     its existing lighting. Overhead-bar sprites are unaffected (unlit).
+
+GLB AUDIT RESULT (node-parsed binary, not eyeballed)
+----------------------------------------------------
+ALL 13 character GLBs have: 0 animation clips, 0 skins/rigs, 0 textures/images.
+They are static AI-generated primitive assemblies (Blender node names are
+"Cube", "Cone", "Cylinder"...), 1.1k-2.4k tris each, centered on origin
+(bbox y spans negative..positive, i.e. NOT ground-planted).
+
+  hero_cleric/glb 4908v | hero_juggernaut 2540v | hero_mage 2844v
+  hero_necromancer 2396v | hero_ranger 4716v | hero_rogue 2352v
+  enemy_* 2328-4608v | boss_sovereign 2456v
+
+Consequence: swapping the articulated procedural heroes (walk cycles, attack
+swings, jump poses, wings/falcon/orbiters, class weapons) for these static
+GLBs would be a visual REGRESSION. Heroes/enemies stay procedural; the track
+upgraded them via PBR + rim + shadows + combat animation instead.
+
+BOSS CHANGE (entities.js createBossMesh)
+----------------------------------------
+Removed the `attachEntityGLB(bodyGroup, '/assets/models/boss_sovereign.glb', ...)`
+mount. Rationale (bbox-verified): the GLB is origin-centered (y -1.58..1.43) and
+2.9 units wide — at any grounded offset it either sat half-buried or clipped
+through the larger sculpted procedural colossus built over it (x half-width 1.81
+> torso radius ~1.35). It contributed only clipping clutter + wasted draw calls.
+The procedural molten colossus IS the boss. models/ directory untouched.
+Boss death now plays tip-over + sink + fade (was: instant hide).
+
+USER INPUT NEEDED (not attempted)
+---------------------------------
+- Mixamo animation clips: require an Adobe login the agent does not have. If the
+  user wants real mocap clips, they must download the FBX files (Idle, Walk,
+  Attack, Death, Hit) and drop them in client/assets/models/; a follow-up pass
+  can retarget them onto the procedural rigs via AnimationMixer.
+- CC0 assets (Quaternius/KayKit): evaluated and DECLINED. Their low-poly cute
+  style clashes with the dark-fantasy art direction and would not beat the
+  current class-distinct articulated heroes; integration (rig retarget) cost
+  exceeds the gain. No external assets were added.
+
+VERIFICATION DONE
+-----------------
+- node --check on all 4 touched/added files: OK.
+- Headless smoke test (node, stubbed canvas): material classification, normal-map
+  assignment, env-map application, hit flash, attack lunge, damage detection,
+  death fade + reset, rim-light layer isolation, blob-shadow flatness: ALL PASS.
+- Server boot check: node server/server.js starts clean (HTTP 200 on /,
+  /vendor/three.module.js, all 3 new modules, entities.js, RoomEnvironment.js).

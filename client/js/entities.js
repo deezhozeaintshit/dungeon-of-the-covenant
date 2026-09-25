@@ -1,6 +1,10 @@
 // entities.js - High-Fidelity Articulated 3D Characters, Menacing Monsters & Blender 5.2 GLB Rig
 import * as THREE from '/vendor/three.module.js';
 import { GLTFLoader } from '/vendor/addons/loaders/GLTFLoader.js';
+// characters track: PBR material pass, procedural combat animation, rim light + blob shadows
+import { upgradeCharacterMaterials, buildCharacterEnvMap, applyEnvMapToGroup } from './characterMaterials.js?v=9.0';
+import { ensureCombatAnimState, triggerHitFlash, triggerAttackLunge, triggerDeathFade, resetDeathFade, updateCombatAnimation, detectDamage } from './characterAnimation.js?v=9.0';
+import { enableCharacterLightLayer, attachBlobShadow, updateCharacterLighting } from './characterLighting.js?v=9.0';
 
 export class EntityManager {
   constructor(scene) {
@@ -12,6 +16,31 @@ export class EntityManager {
     this.bossMesh = null;
     this.targetReticle = this.createTargetReticle();
     this.scene.add(this.targetReticle);
+    // Shared PMREM environment for character PBR materials (set via setRenderer).
+    this._charEnvMap = null;
+  }
+
+  // characters track: give EntityManager the WebGLRenderer so character PBR
+  // materials get a real environment reflection map. Safe to call any time;
+  // groups built earlier are upgraded retroactively.
+  setRenderer(renderer) {
+    if (!renderer || this._charEnvMap) return;
+    try {
+      this._charEnvMap = buildCharacterEnvMap(renderer);
+      for (const group of this.playerMeshes.values()) applyEnvMapToGroup(group, this._charEnvMap);
+      for (const group of this.mobMeshes.values()) applyEnvMapToGroup(group, this._charEnvMap);
+      if (this.bossMesh) applyEnvMapToGroup(this.bossMesh, this._charEnvMap);
+    } catch (e) { /* env map is a visual bonus; never break the game */ }
+  }
+
+  // characters track: run once per finished character group — PBR material
+  // upgrade, rim-light layer, blob contact shadow, combat-anim state.
+  finalizeCharacterGroup(group, shadowRadius = 1.1, shadowOpacity = 0.55) {
+    upgradeCharacterMaterials(group, this._charEnvMap);
+    enableCharacterLightLayer(group);
+    attachBlobShadow(group, shadowRadius, shadowOpacity);
+    ensureCombatAnimState(group);
+    return group;
   }
 
   attachEntityGLB(targetParent, url, scale = 0.75, offsetY = 0) {
@@ -25,6 +54,9 @@ export class EntityManager {
           c.receiveShadow = true;
         }
       });
+      // characters track: PBR upgrade + rim-light layer for any mounted GLB
+      upgradeCharacterMaterials(clone, this._charEnvMap);
+      enableCharacterLightLayer(clone);
       targetParent.add(clone);
     };
     if (this.glbCache[url]) {
@@ -178,6 +210,7 @@ export class EntityManager {
 
       const displayLabel = p.streakCount >= 3 ? `${p.name} 🔥x${p.streakCount}` : p.name;
       this.updateOverheadBar(group, p.hp, p.maxHp, displayLabel, false, isLocal);
+      detectDamage(group, p.hp); // characters track: hit flash on hp drop
     }
   }
 
@@ -253,6 +286,7 @@ export class EntityManager {
     const group = this.playerMeshes.get(playerId);
     if (group && group.userData) {
       group.userData.attackTimer = 0.28;
+      triggerAttackLunge(group); // characters track: root forward lunge
     }
   }
 
@@ -632,6 +666,8 @@ export class EntityManager {
     };
 
     this.createOverheadBar(group, p.name, false, isLocal);
+    // characters track: PBR pass, rim-light layer, blob shadow, combat anim
+    this.finalizeCharacterGroup(group, classKey === 'juggernaut' ? 1.35 : 1.05, 0.55);
     return group;
   }
 
@@ -936,6 +972,7 @@ export class EntityManager {
 
       group.position.lerp(new THREE.Vector3(m.x, m.y || 0, m.z), 0.35);
       this.updateOverheadBar(group, m.hp, m.maxHp, m.name, true, false);
+      detectDamage(group, m.hp); // characters track: hit flash on hp drop
 
       if (m.statuses && m.statuses.frozen) {
         if (!group.userData.iceCube) {
@@ -1248,6 +1285,8 @@ export class EntityManager {
     group.userData.phase = Math.random() * Math.PI * 2;
 
     this.createOverheadBar(group, m.name, true, false);
+    // characters track: PBR pass, rim-light layer, blob shadow, combat anim
+    this.finalizeCharacterGroup(group, 1.0, 0.55);
     return group;
   }
 
@@ -1277,17 +1316,24 @@ export class EntityManager {
       this.bossMesh.userData.veinsMat.emissiveIntensity = 4.5;
     }
 
-    // When Boss dies: vanish the colossus body and leave only a glowing Molten Soul-Ring on the floor!
+    detectDamage(this.bossMesh, bossData.hp); // characters track: hit flash
+
+    // When Boss dies: tip-over + fade the colossus, leave the Molten Soul-Ring.
     if (bossData.isDead) {
-      if (this.bossMesh.userData.bodyGroup) {
-        this.bossMesh.userData.bodyGroup.visible = false;
+      const bg = this.bossMesh.userData.bodyGroup;
+      if (bg) {
+        const st = bg.userData.combatAnim;
+        if (!st || st.deathT < 0) triggerDeathFade(bg);
       }
       if (this.bossMesh.userData.deathCrater) {
         this.bossMesh.userData.deathCrater.visible = true;
       }
     } else {
-      if (this.bossMesh.userData.bodyGroup) {
-        this.bossMesh.userData.bodyGroup.visible = true;
+      const bg = this.bossMesh.userData.bodyGroup;
+      if (bg) {
+        const st = bg.userData.combatAnim;
+        if (st && (st.deathT >= 0 || st.deathDone)) resetDeathFade(bg);
+        else bg.visible = true;
       }
       if (this.bossMesh.userData.deathCrater) {
         this.bossMesh.userData.deathCrater.visible = false;
@@ -1304,8 +1350,13 @@ export class EntityManager {
     group.add(bodyGroup);
     group.userData.bodyGroup = bodyGroup;
 
-    // Mount AAA Blender 5.2 Boss Sovereign GLB Model
-    this.attachEntityGLB(bodyGroup, '/assets/models/boss_sovereign.glb', 1.25, 0.05);
+    // characters track: the boss_sovereign.glb mount was REMOVED (2026-09-25).
+    // GLB audit: the model is an unrigged static primitive assembly centered on
+    // its origin (bbox y -1.58..1.43), so at any grounded offset it either sat
+    // half-buried under the floor or clipped through the sculpted procedural
+    // colossus built below (its x half-width 1.81 exceeds the torso radius).
+    // The procedural molten colossus IS the boss visual; the GLB added only
+    // clipping artifacts and wasted draw calls. (models/ dir untouched.)
 
     // Warm Bronze-Obsidian Armor & Glowing Magma Veins (Never pitch-black cubes)
     const armorMat = new THREE.MeshStandardMaterial({
@@ -1416,6 +1467,8 @@ export class EntityManager {
     group.add(deathCrater);
     group.userData.deathCrater = deathCrater;
 
+    // characters track: PBR pass, rim-light layer, blob shadow, combat anim
+    this.finalizeCharacterGroup(group, 2.4, 0.65);
     return group;
   }
 
@@ -1564,6 +1617,9 @@ export class EntityManager {
       if (u.cosmeticGroup && u.cosmeticGroup.userData.orbiters) {
         u.cosmeticGroup.userData.orbiters.rotation.y += dt * 2.2;
       }
+
+      // characters track: hit flash, attack lunge, death fade
+      updateCombatAnimation(group, dt);
     }
 
     // 3. Animate Monster Orbiting Shards / Skulls / Floating Bodies
@@ -1577,6 +1633,14 @@ export class EntityManager {
       if (mu.bodyRoot && (mu.mobType === 'cinder_thrall' || mu.mobType === 'void_assassin' || mu.mobType === 'blight_necrolyte' || mu.mobType === 'elite_lich')) {
         mu.bodyRoot.position.y = Math.sin(mu.phase) * 0.14;
       }
+      // characters track: hit flash on damage
+      updateCombatAnimation(mobGroup, dt);
     }
+
+    // 4. Boss combat animation (death tip-over + fade) & character lighting rig
+    if (this.bossMesh && this.bossMesh.userData.bodyGroup) {
+      updateCombatAnimation(this.bossMesh.userData.bodyGroup, dt);
+    }
+    updateCharacterLighting(dt, performance.now() / 1000);
   }
 }
