@@ -81,6 +81,28 @@ waiting for the next room-state sync.
 - `stealthed: true` for void assassins out of combat — client renders
   them semi-transparent / shimmering until the flag clears.
 
+## Phase 3 — Cinder Thrall (forge elite)
+
+- Elite archetype id: `cinder_thrall` (`role: "elite"`). Spawned by
+  `ProceduralLevelGenerator` on `blood_citadel` (forge) floors; all fields
+  the client needs travel in the existing contract — no new message fields:
+  `type`, `role`, `model` (`"cinder_thrall.glb"`), `modelScale` (`1.25`),
+  `affixes`, `auraColor` on `enemy_spawn`, and `type`/`model`/`modelScale`/
+  `role`/`affixes`/`auraColor`/`biomeTint` on `room_state.mobs[]`.
+- The GLB is unrigged (1 mesh, no skins/bones/animations). The client selects
+  the `cinderThrall` procedural profile from the mob `type` id
+  (`client/js/entities.js` → `animation/ProceduralFallback.js`): ember-bob
+  idle, heavy-lunge attack (triggered client-side from `enemy_telegraph`),
+  crumble/sink death. Lava-crack glow (albedo reused as emissive map),
+  shoulder ember wisps, and the ~1.5s delayed death fade are client-local;
+  they read only the fields above.
+- Combat is server-authoritative. The thrall's melee ignite rider
+  (`burnOnHit: { duration, dps }` in `Archetypes.js`) is applied in
+  `Room.damagePlayer` as the `burning` status (potency = dps) and ticked
+  once per second in the Room player loop. The client already receives
+  `burning` through the existing player `statuses` in the snapshot — no
+  protocol change.
+
 ### 3. `boss_spawn` — S→C
 Broadcast once when a PhaseBoss is created for the floor (before it wakes).
 

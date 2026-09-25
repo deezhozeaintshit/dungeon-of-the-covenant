@@ -4,6 +4,3 @@ node_modules/
 *.zip
 .agents/
 .agnes/
---sse/
-*.log
-.DS_Store

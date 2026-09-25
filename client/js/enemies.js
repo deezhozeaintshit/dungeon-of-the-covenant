@@ -56,6 +56,16 @@ export class EnemyVisuals {
     // Replace any duplicate id (re-telegraph).
     this._removeTelegraph(tel.id);
 
+    // Cinder thrall: drive the procedural heavy-attack lunge on windup start.
+    // (Mob attacks otherwise show only the telegraph decal; this keeps the
+    // elite's strike synced to its telegraph.)
+    try {
+      const mesh = msg.enemyId ? this.getMobMesh(msg.enemyId) : null;
+      if (mesh && mesh.userData && mesh.userData.cinder && mesh.userData.animator) {
+        mesh.userData.animator.play('attack', { duration: Math.max(0.45, windupMs / 1000) });
+      }
+    } catch (e) { /* telegraph rendering must never break */ }
+
     const group = new THREE.Group();
     group.position.set(tel.x || 0, DECAL_Y, tel.z || 0);
 

@@ -10,6 +10,7 @@ import { LootSystem } from './loot.js?v=9.0';
 import { NetworkClient } from './network.js?v=9.0';
 import { AudioManager } from './audiomanager.js?v=9.0';
 import { InAppPurchaseManager } from './inapppurchase.js?v=9.0';
+import { CosmeticShopUI } from './cosmeticShopUI.js?v=9.0';
 import { AchievementSystem } from './achievementsystem.js?v=9.0';
 import { SaveSystem } from './savesystem.js?v=9.0';
 import { TutorialSystem } from './tutorialsystem.js?v=9.0';
@@ -26,9 +27,17 @@ import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
 // animation (Mixamo clips + procedural fallback), progression UI
 // (level-up choices, skill tree, death-respawn), and oath shrines.
 import { EnemyVisuals } from './enemies.js';
+// Phase 3 (workstream 3): game feel — pooled combat VFX, performance monitor,
+// quality-of-life settings (reduced motion honoring prefers-reduced-motion).
+import { EnhancedCombatVFX } from './enhancedcombatvfx.js?v=9.1';
+import { PerformanceMonitor } from './performancemonitor.js?v=9.1';
+import { QualityOfLife } from './qualityoflife.js?v=9.1';
 // (Mixamo clip binding moved to entities.js _bindHeroClipSet.)
 import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
 import { initOathModal } from './ui/oathModal.js';
+import { initMetaProgression } from './ui/metaProgression.js';
+// Phase 3: server-authoritative loot inventory + equipment panel (workstream 2).
+import { initInventoryPanel } from './ui/inventory.js';
 
 const _projV = new THREE.Vector3(); // shared projector scratch vector
 
@@ -97,6 +106,44 @@ const CLASSES = {
       { name: 'Bone Spikes', icon: '🦴', desc: 'Linear barrage of piercing bone spears that causes enemies to bleed.' },
       { name: 'Soul Drain', icon: '🔮', desc: 'Channels health siphon from the target, redistributing vitality to all allies.' },
       { name: 'Corpse Explosion', icon: '☣️', desc: 'Detonates fallen enemy corpses into massive toxic burst clouds.' }
+    ]
+  },
+  // Phase 3 meta-progression: unlockable in the Covenant Vault (server-gated).
+  // Blessing trees are inherited from the base family (real abilities).
+  plaguecaller: {
+    name: 'Plaguecaller',
+    role: 'Alchemist',
+    icon: '🧪',
+    unlockable: true,
+    desc: 'VAULT UNLOCK — Bubbling cauldrons of ruin. Siphons life and melts armor with virulent rot. Draws blessings from the necromantic tree.',
+    abilities: [
+      { name: 'Blood Pact', icon: '🩸', desc: 'Every wound you deal feeds you. +4% lifesteal per rank.' },
+      { name: 'Spell Surge', icon: '🌩️', desc: 'Arcane current quickens your hands. +6% cooldown haste per rank.' },
+      { name: 'Iron Skin', icon: '🛡️', desc: 'Your flesh hardens like covenant steel. +60 max HP per rank.' }
+    ]
+  },
+  gravewarden: {
+    name: 'Grave Warden',
+    role: 'Sentinel',
+    icon: '⚰️',
+    unlockable: true,
+    desc: 'VAULT UNLOCK — An unmoving tombstone with a heartbeat. Holds the line where others break. Draws blessings from the juggernaut tree.',
+    abilities: [
+      { name: 'Iron Skin', icon: '🛡️', desc: 'Your flesh hardens like covenant steel. +60 max HP per rank.' },
+      { name: 'Thornmail', icon: '🌵', desc: 'Your armor bites back. Reflect 15% of damage taken per rank.' },
+      { name: 'Radiant Guard', icon: '✨', desc: 'Blessed plate shrugs off blows. +3 flat armor per rank.' }
+    ]
+  },
+  hexblade: {
+    name: 'Hexblade',
+    role: 'Dark Knight',
+    icon: '🗡️',
+    unlockable: true,
+    desc: 'VAULT UNLOCK — A cursed blade that drinks from the shadows it cuts. Fast, cruel, precise. Draws blessings from the rogue tree.',
+    abilities: [
+      { name: 'Executioner', icon: '🩸', desc: 'You smell blood. +5% critical chance per rank.' },
+      { name: 'Swift Foot', icon: '💨', desc: 'The dark cannot catch you. +4% move speed per rank.' },
+      { name: 'Blood Pact', icon: '🩸', desc: 'Every wound you deal feeds you. +4% lifesteal per rank.' }
     ]
   }
 };
@@ -194,6 +241,16 @@ class GameApp {
         amount,
         amount >= 120 ? 'crit' : 'phys'
       );
+      // Phase 3 game feel: pooled hit sparks on every real hit, trauma-scaled
+      // screen shake, and a hit-stop dip on heavy (crit-threshold) hits.
+      if (this.feelFX && this.gameState === 'dungeon') {
+        const heavy = amount >= 120;
+        this.feelFX.hitSparks(p.x, p.y + 1.2, p.z, amount, heavy ? 0xffdd88 : 0xffcc66);
+        if (this.renderer) {
+          this.renderer.addTrauma(heavy ? 0.5 : Math.min(0.22, amount / 900));
+          if (heavy) this.renderer.triggerHitStop(70);
+        }
+      }
     });
     // Boot: loading screen first; lobby reveals on server connect
     this.ui.screens.loading.show();
@@ -213,9 +270,24 @@ class GameApp {
         this.entities.setRenderer(this.renderer.renderer);
       }
       this.combat = new CombatVisuals(this.renderer.scene);
-      this.loot = new LootSystem(this.renderer.scene, (choice) => {
-        this.network.submitLootRoll(choice);
-      });
+      // Phase 3: floor-loot visuals only (drops are server-decided;
+      // inventory/equip UI lives in ui/inventory.js).
+      this.loot = new LootSystem(this.renderer.scene);
+      // Phase 3 (workstream 3): game feel — pooled VFX engine, perf monitor,
+      // QoL settings. All real-event driven; zero per-frame allocation.
+      this.feelFX = new EnhancedCombatVFX(this.renderer.scene);
+      this.perfMonitor = new PerformanceMonitor();
+      this.perfMonitor.start();
+      this.qol = new QualityOfLife(this);
+      this.qol.loadSettings();
+      // prefers-reduced-motion: OS-level signal disables shake + hit-stop
+      // unless the player explicitly overrode the setting before.
+      if (!localStorage.getItem('rpg_qol_settings') &&
+          window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        this.qol.features.reducedMotion = true;
+      }
+      this.renderer.setReducedMotion(!!this.qol.features.reducedMotion);
+      this._wireFeelHooks();
     } catch (err) {
       console.error('3D Renderer initialization error:', err);
     }
@@ -255,6 +327,37 @@ class GameApp {
       }
     }
 
+    // Phase 3 meta-progression (workstream 5): persistent account ranks +
+    // Covenant Vault unlockables. Server-authoritative; the client only
+    // renders state and sends itemIds for purchases.
+    this.metaUI = initMetaProgression({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      getAuthToken: () => this.authToken,
+      getLocalPlayerId: () => this.localPlayerId,
+      onState: () => this.applyMetaClassLocks(),
+      onClaim: () => this.audio.playSFX('powerup')
+    });
+    if (this.metaUI && this.metaUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.metaUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
+    }
+    this.metaUI.refresh();
+
+    // Phase 3: server-authoritative inventory + equipment (workstream 2).
+    // The panel is display-only; equip/unequip send id/slot to the server,
+    // which validates and broadcasts the authoritative inventory_update.
+    try {
+      this.inventoryPanel = initInventoryPanel({
+        onEquip: (itemId) => { if (this.network) this.network.equipItem(itemId); },
+        onUnequip: (slot) => { if (this.network) this.network.unequipItem(slot); }
+      });
+    } catch (err) {
+      console.warn('[Phase3] Inventory panel init failed:', err);
+      this.inventoryPanel = null;
+    }
+
     // Start Animation Loop
     this.lastTime = performance.now();
     requestAnimationFrame((t) => this.renderLoop(t));
@@ -277,11 +380,11 @@ class GameApp {
       this.profile = { shards: 300, unlockedAuras: [], cosmeticAura: null, title: 'Soul-Sworn', mightRank: 0, vitalityRank: 0, hasteRank: 0 };
     }
 
-    // Initialize Agnes AI's InAppPurchaseManager with our Emporium Catalog
+    // Phase 3 cosmetic shop (workstream 6): the InAppPurchaseManager loads the
+    // server's Stripe config + catalog, and CosmeticShopUI renders the shop.
+    // Both init lazily in the shop section below; nothing pay-to-win exists.
     if (this.iap) {
-      this.iap.init('web');
-      this.iap.registerProduct('starter_pack', { name: 'Vanguard Starter Pack', price: 1.99, type: 'consumable' });
-      this.iap.registerProduct('founder_pass', { name: "Founder's Sovereign Pass", price: 4.99, type: 'non_consumable' });
+      this.iap.init('web').catch(() => {});
     }
 
     const save = this.saveSystem.load();
@@ -402,6 +505,13 @@ class GameApp {
         <span class="class-role">${info.role}</span>
       `;
       btn.addEventListener('click', () => {
+        // Phase 3 meta-progression: vault-locked classes open the Vault instead.
+        if (this.isClassLocked(key)) {
+          this.audio.playSFX('ui_deny');
+          this.narrator.say(`The ${info.name} is sealed in the Covenant Vault. Claim it there to march as one.`, 'warning');
+          if (this.metaUI) this.metaUI.openVault('classes');
+          return;
+        }
         this.selectClass(key);
         this.audio.playSFX('ui_select');
       });
@@ -409,9 +519,62 @@ class GameApp {
     }
 
     this.updateClassPreview();
+    this.applyMetaClassLocks();
+  }
+
+  // Phase 3 meta-progression: is this hero class sealed in the Covenant Vault
+  // for the current account? Base six are always available.
+  isClassLocked(key) {
+    const info = CLASSES[key];
+    if (!info || !info.unlockable) return false;
+    const unlocked = this.metaUI?.getState()?.meta?.unlockedClasses || [];
+    return !unlocked.includes(key);
+  }
+
+  // Paint lock state onto the class grid from the vault catalog. Called after
+  // the grid is built and whenever vault state refreshes.
+  applyMetaClassLocks() {
+    const grid = document.getElementById('class-grid');
+    if (!grid) return;
+    const catalog = this.metaUI?.getState()?.catalog || [];
+    for (const btn of grid.querySelectorAll('.class-btn')) {
+      const key = btn.getAttribute('data-class');
+      const locked = this.isClassLocked(key);
+      btn.classList.toggle('locked', locked);
+      btn.setAttribute('aria-disabled', locked ? 'true' : 'false');
+      if (locked) {
+        const item = catalog.find(u => u.type === 'class' && u.classKey === key);
+        const req = item ? `${item.rankName} + ${item.cost.toLocaleString()} seals` : 'Covenant Vault';
+        if (!btn.querySelector('.class-lock')) {
+          const lockEl = document.createElement('span');
+          lockEl.className = 'class-lock';
+          lockEl.textContent = '🔒';
+          lockEl.setAttribute('aria-hidden', 'true');
+          btn.appendChild(lockEl);
+          const reqEl = document.createElement('span');
+          reqEl.className = 'class-lock-req';
+          reqEl.textContent = `🔒 ${req}`;
+          btn.appendChild(reqEl);
+        }
+        btn.title = `Sealed in the Covenant Vault — requires ${req}`;
+      } else {
+        btn.querySelector('.class-lock')?.remove();
+        btn.querySelector('.class-lock-req')?.remove();
+        btn.removeAttribute('title');
+      }
+    }
+    // Never leave a sealed class selected (e.g. after logout).
+    if (this.isClassLocked(this.selectedClass)) {
+      this.selectClass('juggernaut');
+    }
   }
 
   selectClass(key) {
+    // Phase 3: sealed classes can never be selected, even programmatically.
+    if (this.isClassLocked(key)) {
+      this.narrator.say(`The ${CLASSES[key]?.name || key} is sealed in the Covenant Vault.`, 'warning');
+      return;
+    }
     this.selectedClass = key;
     document.querySelectorAll('.class-btn').forEach(b => {
       b.classList.toggle('selected', b.getAttribute('data-class') === key);
@@ -459,6 +622,8 @@ class GameApp {
           this.audio.playSFX('powerup');
           if (badge) badge.innerText = `✅ Cloud Account Active: ${data.profile.displayName || username}`;
           this.narrator.say(`Welcome back, ${data.profile.displayName || username}! Cloud stats & gear restored.`, 'info');
+          // Phase 3: refresh covenant rank / vault state for the new session.
+          if (this.metaUI) this.metaUI.refresh();
         } else {
           if (badge) badge.innerText = `⚠️ ${data?.error || 'Auth failed'}`;
         }
@@ -473,7 +638,7 @@ class GameApp {
       quickplayBtn.innerText = '⚔️ ENTERING RANDOM DUNGEON MATCH...';
       const name = document.getElementById('player-name-input')?.value.trim() || 'Vanguard';
       this.audio.playSFX('war_horn');
-      this.network.quickplayMatchmaking(name, this.selectedClass, this.profile);
+      this.network.quickplayMatchmaking(name, this.selectedClass, this.profile, this.authToken);
     });
 
     // Optional Private Chamber Create / Join
@@ -482,7 +647,7 @@ class GameApp {
       createBtn.innerText = 'CREATING CHAMBER...';
       const name = document.getElementById('player-name-input').value.trim() || 'Hero';
       this.audio.playSFX('ui_click');
-      this.network.createRoom(name, this.selectedClass, this.profile);
+      this.network.createRoom(name, this.selectedClass, this.profile, this.authToken);
     });
 
     const joinBtn = document.getElementById('btn-join-room');
@@ -495,7 +660,7 @@ class GameApp {
       }
       joinBtn.innerText = 'JOINING...';
       this.audio.playSFX('ui_click');
-      this.network.joinRoom(code, name, this.selectedClass, this.profile);
+      this.network.joinRoom(code, name, this.selectedClass, this.profile, this.authToken);
     });
 
     // Open & Close Covenant Emporium & Sovereign Pass Modal
@@ -508,6 +673,12 @@ class GameApp {
     };
     document.getElementById('btn-lobby-emporium')?.addEventListener('click', openEmp);
     document.getElementById('btn-hud-emporium')?.addEventListener('click', openEmp);
+    // Phase 3 meta-progression: open the Covenant Vault (ranks + unlockables).
+    document.getElementById('btn-covenant-vault')?.addEventListener('click', (e) => {
+      e?.stopPropagation();
+      this.audio.playSFX('ui_select');
+      if (this.metaUI) this.metaUI.openVault();
+    });
     document.getElementById('btn-close-emporium')?.addEventListener('click', (e) => {
       e.stopPropagation();
       empModal?.classList.add('hidden');
@@ -568,131 +739,34 @@ class GameApp {
       });
     });
 
-    // 4. Stripe Live .env Status Sync & Real Character Weapon/Aura Fulfillment
+    // 4. Covenant Cosmetic Shop (Phase 3, workstream 6) — Stripe-backed and
+    //    COSMETICS ONLY. Nothing sold here touches stats, XP, or loot. The shop
+    //    UI renders from the server's public catalog; with no Stripe keys the
+    //    shop shows "coming soon" and the game is fully playable.
     const updateStripeBadge = async () => {
-      const status = await this.iap.getStripeStatus();
       const badge = document.getElementById('stripe-mode-badge');
-      if (badge) {
-        if (status.stripeConfigured) {
-          badge.innerText = '🔒 LIVE STRIPE .ENV CONNECTED';
-          badge.style.background = 'rgba(46, 204, 113, 0.25)';
-          badge.style.color = '#2ecc71';
-          badge.style.borderColor = '#2ecc71';
-        } else {
-          badge.innerText = '⚡ STRIPE .ENV READY';
-        }
-      }
-    };
-    updateStripeBadge();
-
-    const fulfillIAPProduct = (productId) => {
-      if (!this.profile.unlockedAuras) this.profile.unlockedAuras = [];
-      let grantedWeapon = null;
-
-      if (productId === 'starter_pack') {
-        this.profile.shards = (this.profile.shards || 0) + 500;
-        if (!this.profile.unlockedAuras.includes('infernal')) this.profile.unlockedAuras.push('infernal');
-        this.profile.cosmeticAura = 'infernal';
-        this.profile.title = 'Hellfire Warlord';
-        grantedWeapon = {
-          id: 'iap_hellfire_cleaver',
-          name: 'Hellfire Warlord Great-Blade (IAP)',
-          slot: 'weapon',
-          rarity: 'Legendary',
-          color: '#ffaa00',
-          beamColor: 0xffaa00,
-          gearScore: 680,
-          stats: { attackPower: 45, maxHp: 180, critChance: 0.15, lifesteal: 0.10, cooldownHaste: 0.12 }
-        };
-        this.narrator.say('🔥 Vanguard Starter Pack Equipped! +500 Shards, 3D Infernal Crown & Hellfire Great-Blade (GS 680: +45 ATK, +180 HP, +15% CRIT)!', 'info');
-      } else if (productId === 'founder_pass') {
-        this.profile.shards = (this.profile.shards || 0) + 1500;
-        if (!this.profile.unlockedAuras.includes('sovereign')) this.profile.unlockedAuras.push('sovereign');
-        this.profile.cosmeticAura = 'sovereign';
-        this.profile.title = 'Sovereign Ascendant';
-        this.profile.mightRank = (this.profile.mightRank || 0) + 1;
-        this.profile.vitalityRank = (this.profile.vitalityRank || 0) + 1;
-        this.profile.hasteRank = (this.profile.hasteRank || 0) + 1;
-        grantedWeapon = {
-          id: 'iap_sovereign_relicblade',
-          name: 'Sovereign Seraph Relic-Blade (IAP)',
-          slot: 'weapon',
-          rarity: 'Mythic Covenant',
-          color: '#ff2255',
-          beamColor: 0xff2255,
-          gearScore: 1150,
-          stats: { attackPower: 85, maxHp: 350, critChance: 0.25, lifesteal: 0.18, cooldownHaste: 0.20, moveSpeed: 1.5 }
-        };
-        this.narrator.say("👑 Founder's Sovereign Pass Equipped! +1,500 Shards, 3D Seraph Wings & Sovereign Relic-Blade (GS 1150: +85 ATK, +350 HP)!", 'info');
-      } else if (productId === 'mythic_3d_arsenal') {
-        this.profile.shards = (this.profile.shards || 0) + 3500;
-        ['infernal', 'frost', 'void', 'sovereign'].forEach(a => {
-          if (!this.profile.unlockedAuras.includes(a)) this.profile.unlockedAuras.push(a);
-        });
-        this.profile.cosmeticAura = 'sovereign';
-        this.profile.title = 'Grand Architect of the Covenant';
-        this.profile.mightRank = (this.profile.mightRank || 0) + 2;
-        this.profile.vitalityRank = (this.profile.vitalityRank || 0) + 2;
-        this.profile.hasteRank = (this.profile.hasteRank || 0) + 2;
-        grantedWeapon = {
-          id: 'iap_godslayer_scythe',
-          name: "Malakor's Godslayer Astral Scythe (IAP)",
-          slot: 'weapon',
-          rarity: 'Mythic Covenant',
-          color: '#ff2255',
-          beamColor: 0xff2255,
-          gearScore: 1650,
-          stats: { attackPower: 140, maxHp: 600, critChance: 0.35, lifesteal: 0.25, cooldownHaste: 0.30, moveSpeed: 2.2 }
-        };
-        this.narrator.say("⚔️ Mythic 3D Arsenal Equipped! +3,500 Shards, All 4 3D Auras & Malakor's Godslayer Scythe (GS 1650: +140 ATK, +600 HP)!", 'info');
-      }
-
-      if (grantedWeapon) {
-        this.profile.equippedItem = grantedWeapon;
-        this.profile.gearScore = Math.max(this.profile.gearScore || 100, grantedWeapon.gearScore);
-      }
-
-      this.saveProfile();
-      this.audio.playSFX('war_horn');
-
-      if (this.gameState === 'dungeon' && this.network) {
-        this.network.sendInput({
-          equipCosmetic: { aura: this.profile.cosmeticAura, name: this.profile.title, title: this.profile.title },
-          equipIAPItem: grantedWeapon
-        });
+      if (!badge) return;
+      const status = this.iap.shopStatus || {};
+      if (status.shopAvailable) {
+        badge.textContent = status.mode === 'live'
+          ? '💳 Secure checkout by Stripe (LIVE)'
+          : '💳 Secure checkout by Stripe (TEST MODE)';
+      } else {
+        badge.textContent = '🛠️ Cosmetic shop coming soon';
       }
     };
 
-    // Check URL query params for Stripe Checkout return (?stripe_success=1&product_id=...)
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('stripe_success') === '1') {
-      const prodId = urlParams.get('product_id') || 'founder_pass';
-      const sessId = urlParams.get('session_id') || '';
-      fetch(`/api/stripe/verify-session?session_id=${encodeURIComponent(sessId)}&product_id=${encodeURIComponent(prodId)}&token=${encodeURIComponent(this.authToken || '')}`)
-        .catch(() => {})
-        .finally(() => {
-          setTimeout(() => fulfillIAPProduct(prodId), 500);
-        });
-      window.history.replaceState({}, document.title, window.location.pathname);
-    }
-
-    document.getElementById('btn-iap-starter')?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await this.iap.purchase('starter_pack');
-      fulfillIAPProduct('starter_pack');
-    });
-
-    document.getElementById('btn-iap-founder')?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await this.iap.purchase('founder_pass');
-      fulfillIAPProduct('founder_pass');
-    });
-
-    document.getElementById('btn-iap-mythic-bundle')?.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      await this.iap.purchase('mythic_3d_arsenal');
-      fulfillIAPProduct('mythic_3d_arsenal');
-    });
+    this.cosmeticShop = new CosmeticShopUI(this);
+    this.cosmeticShop.init().then(() => {
+      updateStripeBadge();
+      // Merge server-side cosmetic entitlements into the local profile so
+      // equipped skins / weapon glows apply at character spawn.
+      const ent = this.iap.entitlements;
+      if (ent) {
+        if (ent.equippedSkin !== undefined) this.profile.equippedSkin = ent.equippedSkin;
+        if (ent.equippedWeaponGlow !== undefined) this.profile.equippedWeaponGlow = ent.equippedWeaponGlow;
+      }
+    }).catch(() => { updateStripeBadge(); });
 
     // 4. Procedural Dungeon Floor Generator Button & Hotkey (N)
     const triggerFloorGen = (e) => {
@@ -866,37 +940,30 @@ class GameApp {
     };
     document.getElementById('btn-audio-toggle')?.addEventListener('click', toggleAudio);
 
-    // Keyboard Shortcuts: [H] Clean HUD Toggle, [M] Audio Toggle, [Escape] Close Any Open Popup/Drawer/Modal
+    // Keyboard Shortcuts: [H] Clean HUD Toggle, [M] Audio Toggle, [I] Inventory, [Escape] Close Any Open Popup/Drawer/Modal
     window.addEventListener('keydown', (e) => {
       if (document.activeElement?.tagName === 'INPUT') return;
       if ((e.key === 'h' || e.key === 'H') && this.gameState === 'dungeon') {
         toggleCleanHUD();
       } else if (e.key === 'm' || e.key === 'M') {
         toggleAudio();
+      } else if ((e.key === 'i' || e.key === 'I') && this.gameState === 'dungeon') {
+        if (this.inventoryPanel) this.inventoryPanel.toggle();
       } else if (e.key === 'Escape') {
+        if (this.inventoryPanel && this.inventoryPanel.isOpen) this.inventoryPanel.hide();
         document.getElementById('emporium-modal')?.classList.add('hidden');
         document.getElementById('forge-panel')?.classList.add('hidden');
         document.getElementById('secret-card-panel')?.classList.add('hidden');
-        document.getElementById('need-greed-modal')?.classList.add('hidden');
         document.getElementById('narrator-banner')?.classList.add('hidden');
         document.getElementById('ping-wheel')?.classList.add('hidden');
       }
     });
 
-    // Click backdrop of Emporium Modal or Need/Greed Modal to close
+    // Click backdrop of Emporium Modal to close
     document.getElementById('emporium-modal')?.addEventListener('click', (e) => {
       if (e.target.id === 'emporium-modal') {
         e.currentTarget.classList.add('hidden');
       }
-    });
-    document.getElementById('need-greed-modal')?.addEventListener('click', (e) => {
-      if (e.target.id === 'need-greed-modal') {
-        e.currentTarget.classList.add('hidden');
-      }
-    });
-    document.getElementById('btn-close-need-greed')?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      document.getElementById('need-greed-modal')?.classList.add('hidden');
     });
 
     // Start Game from Room Lobby
@@ -1004,6 +1071,42 @@ class GameApp {
     document.addEventListener('touchstart', activateAudio);
   }
 
+  // Phase 3 (workstream 3): hook pooled VFX + trauma into real gameplay events.
+  // Deaths, loot drops, boss kills and spell impacts all route through here.
+  _wireFeelHooks() {
+    // Mob died (removed from the authoritative snapshot).
+    if (this.entities) {
+      this.entities.onMobRemoved = (id, x, z) => {
+        if (this.gameState !== 'dungeon' || !this.feelFX) return;
+        this.feelFX.deathBurst(x, 1.0, z, 0x66ff88);
+        if (this.renderer) this.renderer.addTrauma(0.22);
+      };
+      // Boss kill: the big one — grand burst, full trauma, hit-stop, vignette.
+      this.entities.onBossDied = (x, z) => {
+        if (!this.feelFX) return;
+        this.feelFX.grandBurst(x, 2.0, z, 0xffd700);
+        if (this.renderer) {
+          this.renderer.addTrauma(1.0);
+          this.renderer.triggerHitStop(130);
+        }
+        this.feelFX.pulseDamageVignette(0.35);
+      };
+    }
+    // New loot on the floor: rarity-colored light pillar.
+    if (this.loot) {
+      this.loot.onLootAdded = (l) => {
+        if (!this.feelFX) return;
+        let color = 0xffd700;
+        if (l.type === 'potion_health') color = 0xff2244;
+        else if (l.type === 'gear_drop' && l.itemData && l.itemData.color) {
+          const parsed = parseInt(String(l.itemData.color).replace('#', ''), 16);
+          if (!Number.isNaN(parsed)) color = parsed;
+        } else if (l.type === 'treasure_chest') color = 0xd4af37;
+        this.feelFX.lootBeam(l.x, l.z, color, l.type === 'treasure_chest' ? 1.4 : 1.0);
+      };
+    }
+  }
+
   initNetwork() {
     this.network = new NetworkClient({
       on_connect: () => {
@@ -1065,6 +1168,12 @@ class GameApp {
         this.combat.spawnPartyPing(msg.pingType, msg.x, msg.z, msg.playerName);
         this.narrator.say(`${msg.playerName}: ${msg.pingType.toUpperCase()}!`, 'info');
       },
+      // Phase 3 cosmetic shop: server-validated emote, rebroadcast to the room.
+      player_emote: (msg) => {
+        if (this.entities && msg && msg.playerId && msg.emote) {
+          this.entities.triggerEmote(msg.playerId, msg.emote);
+        }
+      },
       player_attack_fx: (msg) => {
         this.entities.triggerAttackAnimation(msg.playerId);
         if (msg.playerId !== this.localPlayerId) {
@@ -1081,6 +1190,7 @@ class GameApp {
       },
       level_up: (msg) => {
         this.combat.spawnLevelUpFX(msg.x, msg.z, msg.level, msg.playerName || msg.name);
+        if (this.feelFX) this.feelFX.grandBurst(msg.x, 1.0, msg.z, 0xffd700);
         this.audio.playSFX('levelup');
         if (msg.playerId === this.localPlayerId) {
           this.narrator.say(`HERO LEVEL ${msg.level}! Attack Power & Max HP Increased!`, 'info');
@@ -1099,16 +1209,30 @@ class GameApp {
       ground_fx: (msg) => {
         if (msg.fxType === 'bone_spikes') {
           this.combat.spawnBoneSpikes(msg.startX, msg.startZ, msg.dirX, msg.dirZ, msg.length);
+          if (this.feelFX) this.feelFX.createBoneSpikes(msg.startX, msg.startZ, msg.dirX, msg.dirZ, msg.length);
           this.audio.playSFX('bone');
+          if (this.renderer) this.renderer.addTrauma(0.3);
         } else if (msg.fxType === 'corpse_explosion') {
           this.combat.spawnCorpseExplosion(msg.x, msg.z, msg.radius, msg.usedCorpse);
+          if (this.feelFX) this.feelFX.createCorpseExplosion(msg.x, 0.8, msg.z);
           this.audio.playSFX('explosion');
+          if (this.renderer) {
+            this.renderer.addTrauma(0.55);
+            this.renderer.triggerHitStop(60);
+          }
         } else if (msg.fxType === 'frost_nova') {
           this.combat.spawnFloatingText('❄️ FROST NOVA!', msg.x, msg.z, 'crit');
+          if (this.feelFX) this.feelFX.createFrostNova(msg.x, 0.8, msg.z);
           this.audio.playSFX('frost');
+          if (this.renderer) this.renderer.addTrauma(0.35);
         } else if (msg.fxType === 'seismic_vortex') {
           this.combat.spawnFloatingText('🌀 SEISMIC VORTEX!', msg.x, msg.z, 'crit');
+          if (this.feelFX) this.feelFX.createSeismicVortex(msg.x, 0.4, msg.z);
           this.audio.playSFX('explosion');
+          if (this.renderer) {
+            this.renderer.addTrauma(0.6);
+            this.renderer.triggerHitStop(60);
+          }
         }
       },
       beam_fx: (msg) => {
@@ -1149,6 +1273,7 @@ class GameApp {
         this.narrator.say(`${msg.bossName} AWAKENS!`, 'danger');
         this.audio.setMusicMode('boss');
         this.audio.playSFX('explosion');
+        this.audio.playBossStinger();
         const bossBar = document.getElementById('boss-hud-bar');
         if (bossBar) bossBar.classList.remove('hidden');
       },
@@ -1181,16 +1306,48 @@ class GameApp {
         this.audio.setMusicMode('dungeon');
         this.audio.playSFX('kill');
       },
-      start_need_greed: (msg) => {
-        this.loot.showNeedGreedModal(msg.itemName, msg.duration);
-        this.audio.playSFX('chest');
+      // Phase 3 loot & gear (workstream 2): server-authoritative inventory.
+      // inventory_update carries the full authoritative state for this player;
+      // gear messages are filtered by playerId on this side.
+      inventory_update: (msg) => {
+        if (msg.playerId !== this.localPlayerId) return;
+        if (this.inventoryPanel) this.inventoryPanel.update(msg);
       },
-      roll_submitted: (msg) => {
-        this.loot.addRollResult(msg.playerName, msg.choice, msg.roll);
+      gear_pickup: (msg) => {
+        const it = msg.item;
+        if (!it) return;
+        if (msg.playerId === this.localPlayerId) {
+          this.audio.playSFX('loot');
+          if (this.inventoryPanel) this.inventoryPanel.announce(`${it.name} added to backpack.`);
+        }
+        this.narrator.say(`${msg.playerName} claimed [${String(it.rarityName || it.rarity).toUpperCase()}] ${it.name} (GS ${it.gearScore})!`, 'info');
+      },
+      gear_equipped: (msg) => {
+        const it = msg.item;
+        if (!it) return;
+        if (it.rarity === 'mythic' || it.rarity === 'legendary') {
+          this.audio.playSFX('chest');
+        } else {
+          this.audio.playSFX('loot');
+        }
+        const statParts = [];
+        if (it.stats?.damageBuff) statParts.push(`+${Math.round(it.stats.damageBuff * 100)}% DMG`);
+        if (it.stats?.maxHp) statParts.push(`+${it.stats.maxHp} HP`);
+        if (it.stats?.critChance) statParts.push(`+${Math.round(it.stats.critChance * 100)}% CRIT`);
+        if (it.stats?.lifesteal) statParts.push(`+${Math.round(it.stats.lifesteal * 100)}% LEECH`);
+        if (it.stats?.cooldownHaste) statParts.push(`+${Math.round(it.stats.cooldownHaste * 100)}% HASTE`);
+        if (it.stats?.armor) statParts.push(`+${it.stats.armor} ARMOR`);
+        if (it.stats?.resistAll) statParts.push(`+${Math.round(it.stats.resistAll * 100)}% ALL RESIST`);
+        this.narrator.say(`${msg.playerName} equipped [${String(it.rarityName || it.rarity).toUpperCase()}] ${it.name} (GS ${it.gearScore}: ${statParts.join(', ')})!`, 'info');
+        if (msg.playerId === this.localPlayerId && this.inventoryPanel) {
+          this.inventoryPanel.announce(`${it.name} equipped.`);
+        }
+      },
+      gear_error: (msg) => {
+        if (msg.playerId !== this.localPlayerId) return;
         this.audio.playSFX('ui_click');
-      },
-      roll_result: (msg) => {
-        setTimeout(() => this.loot.hideNeedGreedModal(), 2500);
+        this.narrator.say(`⚠️ ${msg.message}`, 'warn');
+        if (this.inventoryPanel) this.inventoryPanel.announce(`Error: ${msg.message}`);
       },
       procedural_floor_generated: (msg) => {
         const cfg = msg.config;
@@ -1201,24 +1358,8 @@ class GameApp {
           }
           this.renderer.triggerScreenShake(0.6);
           this.audio.setMusicMode('dungeon');
+          if (cfg.biome && cfg.biome.id) this.audio.setBiome(cfg.biome.id);
           this.audio.playSFX('war_horn');
-        }
-      },
-      dynamic_loot_equipped: (msg) => {
-        const it = msg.item;
-        if (it) {
-          if (it.rarity === 'Mythic Covenant' || it.rarity === 'Legendary') {
-            this.audio.playSFX('chest');
-          } else {
-            this.audio.playSFX('loot');
-          }
-          const statParts = [];
-          if (it.stats?.attackPower) statParts.push(`+${it.stats.attackPower} ATK`);
-          if (it.stats?.maxHp) statParts.push(`+${it.stats.maxHp} HP`);
-          if (it.stats?.critChance) statParts.push(`+${Math.round(it.stats.critChance * 100)}% CRIT`);
-          if (it.stats?.lifesteal) statParts.push(`+${Math.round(it.stats.lifesteal * 100)}% LEECH`);
-          if (it.stats?.cooldownHaste) statParts.push(`+${Math.round(it.stats.cooldownHaste * 100)}% HASTE`);
-          this.narrator.say(`${msg.playerName} equipped [${it.rarity.toUpperCase()}] ${it.name} (GS ${it.gearScore}: ${statParts.join(', ')})!`, 'info');
         }
       },
       run_completed: (msg) => {
@@ -1229,7 +1370,9 @@ class GameApp {
       },
       party_wipe: (msg) => {
         this.audio.playSFX('hurt');
-        alert('PARTY WIPE! The darkness consumed the covenant.');
+        // Phase 3: the covenant still remembers the attempt — the server
+        // grants reduced account XP/seals (meta_rewards toast follows).
+        alert('PARTY WIPE! The darkness consumed the covenant.\n\nThe Vault still records your deeds — earned account XP and seals await in the lobby.');
         setTimeout(() => window.location.reload(), 2000);
       },
       error: (msg) => {
@@ -1382,6 +1525,9 @@ class GameApp {
       if (this.dungeon && typeof this.dungeon.applyProceduralFloorConfig === 'function') {
         this.dungeon.applyProceduralFloorConfig(snap.proceduralConfig);
       }
+      // Phase 3 audio: match the ambient bed to the floor's biome.
+      const floorBiome = snap.proceduralConfig.biome;
+      if (floorBiome && floorBiome.id && this.audio) this.audio.setBiome(floorBiome.id);
     }
 
     // 1. Sync Players
@@ -1423,6 +1569,16 @@ class GameApp {
       const lp = snap.players.find(p => p.id === this.localPlayerId);
       if (lp) {
         this.ui.hud.updateVitals({ hp: lp.hp, maxHp: lp.maxHp, mana: lp.mana, maxMana: lp.maxMana });
+        // Phase 3 game feel: damage vignette pulse + light trauma on real HP loss.
+        if (typeof lp.hp === 'number') {
+          if (this._lastLocalHp !== undefined && lp.hp < this._lastLocalHp - 1 && this.feelFX) {
+            const lost = this._lastLocalHp - lp.hp;
+            const maxHp = lp.maxHp || 100;
+            this.feelFX.pulseDamageVignette(Math.min(1, (lost / maxHp) * 2.2));
+            if (this.renderer) this.renderer.addTrauma(Math.min(0.4, lost / maxHp * 1.4));
+          }
+          this._lastLocalHp = lp.hp;
+        }
         // Phase 2: XP/level/ability-point bar from the authoritative snapshot.
         updateXPBar({ level: lp.level || 1, xp: lp.xp || 0, nextLevelXp: lp.nextLevelXp || 100 });
         if (this.ui.screens) {
@@ -1586,11 +1742,46 @@ class GameApp {
     // Unlock achievement
     this.achievements.unlock('boss_slayer');
     this.saveGameProgress();
+
+    // Phase 3 meta-progression: render the SERVER-COMPUTED account rewards
+    // (account XP, seals, rank-ups) into the covenant panel, then refresh the
+    // vault state so the lobby chip and class locks update.
+    const metaList = document.getElementById('meta-rewards-list');
+    if (metaList) {
+      metaList.innerHTML = '';
+      const rewards = summary.meta || [];
+      if (!rewards.length) {
+        const p = document.createElement('p');
+        p.className = 'meta-rewards-empty';
+        p.textContent = 'Guest expedition — log in to a Covenant account to earn persistent ranks and seals.';
+        metaList.appendChild(p);
+      }
+      for (const r of rewards) {
+        const row = document.createElement('div');
+        row.className = 'meta-reward-row';
+        const nameEl = document.createElement('span');
+        nameEl.className = 'meta-reward-name';
+        nameEl.textContent = r.name;
+        const gainsEl = document.createElement('span');
+        gainsEl.className = 'meta-reward-gains';
+        gainsEl.textContent = `+${r.accountXpGained.toLocaleString()} account XP • +${r.sealsGained.toLocaleString()} 🔏 seals`;
+        const rankEl = document.createElement('span');
+        rankEl.className = 'meta-reward-rank';
+        rankEl.textContent = r.rankUp
+          ? `🔥 RANK UP — ${r.rank.icon} ${r.rank.name}!`
+          : `${r.rank.icon} ${r.rank.name}`;
+        row.append(nameEl, gainsEl, rankEl);
+        metaList.appendChild(row);
+      }
+    }
+    if (this.metaUI) this.metaUI.refresh();
   }
 
   renderLoop(time) {
-    const dt = Math.min(0.1, (time - this.lastTime) / 1000);
+    const rawDt = Math.min(0.1, (time - this.lastTime) / 1000);
     this.lastTime = time;
+    // Phase 3 game feel: hit-stop timescale scales every simulation update.
+    const dt = this.renderer ? this.renderer.beginFrame(rawDt) : rawDt;
 
     // Auto-Aim & Target Lock
     if (this.latestSnapshot && this.latestSnapshot.players) {
@@ -1638,6 +1829,8 @@ class GameApp {
     this.combat.update(dt);
     this.loot.update(dt);
     this.entities.update(dt);
+    // Phase 3 game feel: pooled particles, beams, rings, damage vignette.
+    if (this.feelFX) this.feelFX.update(dt);
     // Phase 2: enemy telegraph/progress visuals + oath shrine proximity tick.
     if (this.enemyVisuals) this.enemyVisuals.update(dt);
     if (this.oathUI) this.oathUI.tick(dt, time * 0.001);
@@ -1649,7 +1842,16 @@ class GameApp {
     // Update Camera Target (Follow local player)
     let localMesh = this.entities.playerMeshes.get(this.localPlayerId);
     const followPos = localMesh ? localMesh.position : null;
-    this.renderer.update(dt, followPos);
+    this.renderer.update(rawDt, followPos);
+
+    // Phase 3: feed the performance monitor (drives bloom auto-degrade).
+    if (this.perfMonitor) {
+      const entityCount = (this.entities ? this.entities.mobMeshes.size : 0) +
+        (this.entities ? this.entities.playerMeshes.size : 0);
+      const particleCount = this.feelFX ? this.feelFX.activeParticleCount : 0;
+      this.perfMonitor.updateFrame(this.renderer.renderer, entityCount, particleCount, 0);
+      this.renderer.autoTuneQuality(this.perfMonitor.getAverageFPS(), rawDt);
+    }
 
     requestAnimationFrame((t) => this.renderLoop(t));
   }

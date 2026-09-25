@@ -38,7 +38,7 @@ function archetypeOf(mob) {
   const t = mob.type || '';
   if (t === 'bone_archer') return 'ranged';
   if (t === 'blight_necrolyte') return 'caster';
-  if (t === 'elite_executioner' || t === 'elite_lich') return 'elite';
+  if (t === 'elite_executioner' || t === 'elite_lich' || t === 'cinder_thrall') return 'elite';
   if (t === 'boss_malakor') return 'boss';
   return 'skirmisher';
 }

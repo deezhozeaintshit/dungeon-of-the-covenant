@@ -1,5 +1,10 @@
 // renderer.js - Three.js PBR Graphics, Farther Tactical Camera, Orbit/Zoom Camera Controls & Wing Lighting
 import * as THREE from '/vendor/three.module.js';
+import { EffectComposer } from '/vendor/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from '/vendor/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from '/vendor/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from '/vendor/addons/postprocessing/OutputPass.js';
+import { TraumaShake, HitStop } from './camerashake.js?v=9.1';
 
 export class GameRenderer {
   constructor(container) {
@@ -41,10 +46,22 @@ export class GameRenderer {
     // 5. Floating Golden Embers
     this.setupAtmospherics();
 
-    // 6. Camera Screen Shake & Hit-Stop
-    this.shakeIntensity = 0;
-    this.shakeDecay = 0.9;
-    this.hitStopDuration = 0;
+    // 6. Camera Feel: trauma-based screen shake + hit-stop timescale
+    // (pure logic in camerashake.js; zero allocation in the hot loop)
+    this.traumaShake = new TraumaShake();
+    this.hitStop = new HitStop();
+    this.timeScale = 1; // consumed by the main loop to scale simulation dt
+    this._shakeOut = { ox: 0, oy: 0, oz: 0, roll: 0, pitch: 0, yaw: 0 };
+    this._desiredCamPos = new THREE.Vector3();
+
+    // 6b. Post-processing: bloom composer + quality tiers (off/low/high/auto)
+    this.qualityMode = 'auto';       // user setting: 'auto' | 'off' | 'low' | 'high'
+    this.qualityEffective = 'high';  // resolved tier actually in use
+    this.userBloom = 0.8;            // from the settings slider (0..1)
+    this._autoTuneTimer = 0;
+    this._autoTuneCooldown = 0;
+    this._setupPostProcessing();
+    this._applyQuality();
 
     // 7. Slow-Mo Kill Cam Orbit (Auto-ends after 3.5s so player keeps camera control)
     this.killCamActive = false;
@@ -269,11 +286,98 @@ export class GameRenderer {
   }
 
   triggerScreenShake(magnitude = 0.5) {
-    this.shakeIntensity = Math.max(this.shakeIntensity, magnitude);
+    this.traumaShake.addTrauma(magnitude);
+  }
+
+  addTrauma(amount) {
+    this.traumaShake.addTrauma(amount);
   }
 
   triggerHitStop(ms = 60) {
-    this.hitStopDuration = ms / 1000;
+    this.hitStop.trigger(ms);
+  }
+
+  setReducedMotion(enabled) {
+    this.traumaShake.setReducedMotion(enabled);
+    this.hitStop.setReducedMotion(enabled);
+  }
+
+  // ------------------------------------------------------------------
+  // Post-processing (UnrealBloomPass) with quality tiers + auto-degrade
+  // ------------------------------------------------------------------
+  _setupPostProcessing() {
+    const pr = this.renderer.getPixelRatio();
+    // MSAA render target (WebGL2): keeps edges clean while compositing.
+    const rt = new THREE.WebGLRenderTarget(
+      Math.floor(this.width * pr), Math.floor(this.height * pr),
+      { type: THREE.HalfFloatType, samples: 4 }
+    );
+    this.composer = new EffectComposer(this.renderer, rt);
+    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    this.bloomPass = new UnrealBloomPass(
+      new THREE.Vector2(this.width, this.height),
+      this.userBloom, // strength
+      0.55,           // radius
+      0.82            // threshold
+    );
+    this.composer.addPass(this.bloomPass);
+    this.composer.addPass(new OutputPass());
+  }
+
+  // The settings slider calls this (previously missing -> runtime crash).
+  setBloomIntensity(value) {
+    this.userBloom = Math.max(0, Math.min(1, Number(value) || 0));
+    this._applyQuality();
+  }
+
+  // mode: 'auto' | 'off' | 'low' | 'high'
+  setQuality(mode) {
+    if (!['auto', 'off', 'low', 'high'].includes(mode)) return;
+    this.qualityMode = mode;
+    if (mode !== 'auto') {
+      this.qualityEffective = mode;
+      this._applyQuality();
+    } else {
+      this.qualityEffective = 'high';
+      this._autoTuneCooldown = 0;
+      this._applyQuality();
+    }
+  }
+
+  _applyQuality() {
+    const q = this.qualityEffective;
+    if (q === 'off') {
+      this.renderer.setPixelRatio(1);
+      // composer unused; nothing else to touch
+    } else {
+      const pr = q === 'high' ? Math.min(window.devicePixelRatio, 2) : 1;
+      this.renderer.setPixelRatio(pr);
+      this.composer.setPixelRatio(pr);
+      this.composer.setSize(this.width, this.height);
+      this.bloomPass.strength = q === 'high' ? this.userBloom : this.userBloom * 0.55;
+      this.bloomPass.threshold = q === 'high' ? 0.82 : 0.88;
+      this.bloomPass.radius = 0.55;
+    }
+  }
+
+  // Called every frame from the main loop with PerformanceMonitor's rolling
+  // average. In 'auto' mode this steps the tier down quickly when fps tanks
+  // and steps it back up only after sustained good frames.
+  autoTuneQuality(avgFps, dt) {
+    if (this.qualityMode !== 'auto') return;
+    this._autoTuneTimer += dt;
+    this._autoTuneCooldown = Math.max(0, this._autoTuneCooldown - dt);
+    if (this._autoTuneTimer < 2.0) return;
+    this._autoTuneTimer = 0;
+    const next = nextQualityTier(this.qualityEffective, avgFps);
+    if (next !== this.qualityEffective) {
+      // Step-ups need a calm period so the tier doesn't oscillate.
+      const steppingUp = ['off', 'low', 'high'].indexOf(next) > ['off', 'low', 'high'].indexOf(this.qualityEffective);
+      if (steppingUp && this._autoTuneCooldown > 0) return;
+      this.qualityEffective = next;
+      this._autoTuneCooldown = steppingUp ? 8 : 0;
+      this._applyQuality();
+    }
   }
 
   startKillCam(x, z) {
@@ -283,11 +387,18 @@ export class GameRenderer {
     this.killCamAngle = 0;
   }
 
+  // Called by the main loop before any simulation updates. Advances the
+  // hit-stop clock and returns the timescale-scaled dt for the frame.
+  beginFrame(rawDt) {
+    this.timeScale = this.hitStop.update(rawDt);
+    return rawDt * this.timeScale;
+  }
+
   update(dt, followTargetPos = null) {
-    if (this.hitStopDuration > 0) {
-      this.hitStopDuration -= dt;
-      return;
-    }
+    // Hit-stop: timescale dips to 0 on heavy hits, then ramps back. The main
+    // loop scales simulation dt by this.timeScale (see beginFrame); here we
+    // freeze the camera too so the whole frame holds for the stop window.
+    if (this.timeScale <= 0.001) return;
 
     const time = performance.now() * 0.001;
 
@@ -329,13 +440,13 @@ export class GameRenderer {
       const offsetX = Math.sin(this.cameraYaw) * horizDist;
       const offsetZ = Math.cos(this.cameraYaw) * horizDist;
 
-      const desiredCamPos = new THREE.Vector3(
+      this._desiredCamPos.set(
         this.cameraTarget.x + offsetX,
         this.cameraTarget.y + vertDist,
         this.cameraTarget.z + offsetZ
       );
 
-      this.camera.position.lerp(desiredCamPos, 0.22);
+      this.camera.position.lerp(this._desiredCamPos, 0.22);
       this.camera.lookAt(this.cameraTarget);
 
       if (this.heroLight) {
@@ -343,18 +454,25 @@ export class GameRenderer {
       }
     }
 
-    // 4. Screen Shake Offset
-    if (this.shakeIntensity > 0.01) {
-      const ox = (Math.random() - 0.5) * this.shakeIntensity;
-      const oy = (Math.random() - 0.5) * this.shakeIntensity;
-      const oz = (Math.random() - 0.5) * this.shakeIntensity;
-      this.camera.position.add(new THREE.Vector3(ox, oy, oz));
-      this.shakeIntensity *= this.shakeDecay;
-    } else {
-      this.shakeIntensity = 0;
+    // 4. Trauma Screen Shake: translational + rotational, magnitude = trauma^2.
+    // Zero allocation: writes into _shakeOut, applied via direct components.
+    this.traumaShake.update(dt, this._shakeOut);
+    const s = this._shakeOut;
+    if (s.ox !== 0 || s.oy !== 0 || s.oz !== 0) {
+      this.camera.position.x += s.ox;
+      this.camera.position.y += s.oy;
+      this.camera.position.z += s.oz;
+      this.camera.rotation.z += s.roll;
+      this.camera.rotation.x += s.pitch;
+      this.camera.rotation.y += s.yaw;
     }
 
-    this.renderer.render(this.scene, this.camera);
+    // 5. Render: bloom composer, or direct when quality is off.
+    if (this.qualityEffective === 'off') {
+      this.renderer.render(this.scene, this.camera);
+    } else {
+      this.composer.render();
+    }
   }
 
   onResize() {
@@ -363,5 +481,15 @@ export class GameRenderer {
     this.camera.aspect = this.width / this.height;
     this.camera.updateProjectionMatrix();
     this.renderer.setSize(this.width, this.height);
+    if (this.composer) this.composer.setSize(this.width, this.height);
   }
+}
+
+// Pure auto-degrade decision: exported for headless testing.
+export function nextQualityTier(current, avgFps) {
+  const order = ['off', 'low', 'high'];
+  const idx = order.indexOf(current);
+  if (avgFps < 27 && idx > 0) return order[idx - 1];        // degrade fast
+  if (avgFps > 55 && idx < order.length - 1) return order[idx + 1]; // recover slowly
+  return current;
 }

@@ -590,12 +590,78 @@ const POSE_LIBS = {
 };
 
 // ---------------------------------------------------------------------------
+// CINDER THRALL profile — forge elite (unrigged lava-rock brute GLB).
+// Selected via object3D.userData.procProfile === 'cinderThrall' in
+// createProceduralDriver(). Whole-body root motion, heavier and slower
+// than the generic mob poses: ember-bob idle, heavy lunge attack,
+// crumble-and-sink death (the fade itself is driven by entities.js).
+// ---------------------------------------------------------------------------
+
+function cinderIdle(t) {
+  // Ember-bob: slow vertical bob + slight side sway, like heat shimmer.
+  const bob = Math.sin(t * 1.6);
+  return O('root', {
+    p: [Math.sin(t * 0.9) * 0.035, bob * 0.07, 0],
+    r: [Math.sin(t * 1.1) * 0.022, 0, Math.sin(t * 0.9) * 0.035]
+  });
+}
+
+function cinderAttack(t, dur) {
+  // Heavy lunge: slow rear-back windup, then a hard forward surge, settle.
+  const k = clamp01(t / dur);
+  let lunge, pitch, squash;
+  if (k < 0.42) {
+    const w = easeOutCubic(seg(k, 0, 0.42)); // rear back
+    lunge = -0.42 * w; pitch = -0.38 * w; squash = -0.08 * w;
+  } else if (k < 0.66) {
+    const s = easeInCubic(seg(k, 0.42, 0.66)); // surge forward
+    lunge = -0.42 + s * 1.55; pitch = -0.38 + s * 0.88; squash = -0.08 + s * 0.2;
+  } else {
+    const r = easeInOut(seg(k, 0.66, 1)); // settle
+    lunge = 1.13 * (1 - r); pitch = 0.5 * (1 - r); squash = 0.12 * (1 - r);
+  }
+  return O('root', {
+    p: [0, squash, lunge],
+    r: [pitch, 0, 0],
+    s: [1 + squash * 0.5, 1 + squash, 1 + squash * 0.5]
+  });
+}
+
+function cinderDeath(t, dur) {
+  // Crumble + sink: collapse inward and drop into the ground.
+  // Holds the final pose; entities.js fades the materials alongside.
+  const k = clamp01(t / dur);
+  const crumble = easeInCubic(seg(k, 0, 0.5));
+  const sink = easeInOut(seg(k, 0.35, 1));
+  return O('root', {
+    p: [0.1 * crumble, -0.25 * crumble - 1.5 * sink, -0.15 * crumble],
+    r: [0.25 * crumble, 0.3 * crumble, 0.12 * crumble],
+    s: [1 + 0.25 * crumble, 1 - 0.55 * crumble, 1 + 0.25 * crumble]
+  });
+}
+
+const CINDER_POSES = {
+  ...MOB_POSES,
+  idle: (t) => cinderIdle(t),
+  attack: (t, o) => cinderAttack(t, o.duration || 1.1),
+  attackUpper: (t, o) => cinderAttack(t, o.duration || 1.1),
+  death: (t, o) => cinderDeath(t, o.duration || DEFAULT_DUR.death),
+  downed: (t, o) => cinderDeath(t, o.duration || DEFAULT_DUR.death)
+};
+
+const PROFILE_LIBS = {
+  cinderThrall: CINDER_POSES
+};
+
+// ---------------------------------------------------------------------------
 // Driver factory
 // ---------------------------------------------------------------------------
 
 export function createProceduralDriver(object3D) {
   const rig = detectRig(object3D);
-  const lib = POSE_LIBS[rig.kind] || SIMPLE_POSES;
+  // Named profile override (e.g. cinderThrall) takes precedence over rig kind.
+  const profile = object3D && object3D.userData && object3D.userData.procProfile;
+  const lib = (profile && PROFILE_LIBS[profile]) || POSE_LIBS[rig.kind] || SIMPLE_POSES;
   const base = captureBase(rig);
 
   return {

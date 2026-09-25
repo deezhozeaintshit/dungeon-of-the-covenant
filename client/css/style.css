@@ -1337,6 +1337,20 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 .stats-table tbody tr:last-child td { border-bottom: none; }
 .victory-actions { text-align: center; }
 
+/* Phase 3 meta-progression: covenant account rewards on the victory screen */
+.meta-rewards-section { margin-top: 22px; }
+.meta-rewards-section h3 { text-align: center; color: var(--gold-hi); font-size: 1rem; letter-spacing: 0.18em; }
+.meta-rewards-sub { text-align: center; color: var(--parchment-dim); font-size: 0.8rem; margin: 2px 0 10px; }
+.meta-rewards-list { display: flex; flex-direction: column; gap: 8px; max-width: 640px; margin: 0 auto; }
+.meta-reward-row {
+  display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: baseline; justify-content: space-between;
+  background: var(--panel); border: 1px solid var(--panel-line); border-radius: 10px; padding: 10px 16px;
+}
+.meta-reward-name { font-weight: 700; color: var(--parchment); }
+.meta-reward-gains { color: var(--gold-soft); font-size: 0.85rem; }
+.meta-reward-rank { color: var(--violet-hi); font-size: 0.85rem; }
+.meta-rewards-empty { text-align: center; color: var(--parchment-dim); font-size: 0.85rem; }
+
 /* audio prompt */
 .audio-prompt {
   position: fixed;
@@ -1539,3 +1553,70 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .character-select-section { display: flex; flex-direction: column; }
 .narrator-ornament.left { margin-right: 2px; }
 .narrator-ornament.right { margin-left: 2px; }
+
+/* ==========================================================================
+   Phase 3 — Covenant Cosmetic Shop (workstream 6). Cosmetics only, never
+   pay-to-win. WCAG 2.1 AA: real buttons, visible focus (global
+   :focus-visible rule), 4.5:1+ text contrast on dark cards, aria-live status.
+   ========================================================================== */
+.shop-fairness-banner {
+  margin: 6px 0 10px;
+  padding: 10px 14px;
+  border: 1.5px solid #2ecc71;
+  border-radius: 10px;
+  background: rgba(46, 204, 113, 0.08);
+  color: #eafbef;
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+.shop-fairness-banner strong { color: #7bed9f; letter-spacing: 0.03em; }
+.shop-mode-badge { font-size: 0.75rem; color: #b9a8d9; }
+.shop-status { min-height: 1.2em; font-size: 0.85rem; color: #ffe27a; margin: 4px 0 8px; }
+.shop-coming-soon {
+  text-align: center;
+  padding: 28px 18px;
+  border: 1.5px dashed #6b5a8a;
+  border-radius: 12px;
+  background: rgba(20, 14, 34, 0.6);
+  color: #d9cbf2;
+}
+.shop-coming-soon h4 { margin: 8px 0 6px; color: #f0e6ff; font-size: 1.05rem; }
+.shop-coming-soon p { margin: 0 auto; max-width: 46ch; font-size: 0.9rem; line-height: 1.5; }
+.coming-soon-icon { font-size: 2rem; }
+.cosmetic-shop-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+.cosmetic-card {
+  border: 1.5px solid #4a3a6a;
+  border-radius: 12px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(24, 17, 40, 0.85);
+  color: #efe9fa;
+}
+.cosmetic-kind-skin { border-color: #9d4edd; }
+.cosmetic-kind-weaponGlow { border-color: #ff9f43; }
+.cosmetic-kind-emote { border-color: #2ecc71; }
+.cosmetic-kind-bundle { border-color: #ffd700; }
+.cosmetic-icon { font-size: 1.8rem; line-height: 1; }
+.cosmetic-kind {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #b9a8d9;
+}
+.cosmetic-name { margin: 0; font-size: 1rem; color: #ffffff; }
+.cosmetic-desc { margin: 0; font-size: 0.82rem; line-height: 1.45; color: #d9cbf2; flex: 1; }
+.cosmetic-price { font-size: 1.05rem; font-weight: 800; color: #ffe27a; }
+.cosmetic-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.cosmetic-buy-btn { border-color: #ffd700; color: #ffe27a; }
+.cosmetic-buy-btn:disabled { opacity: 0.6; cursor: wait; }
+.cosmetic-equip-btn { border-color: #2ecc71; color: #7bed9f; }
+.cosmetic-unequip-btn { border-color: #6b5a8a; color: #b9a8d9; }
+.cosmetic-use-btn { border-color: #66e0ff; color: #a8ecff; }
+/* Legacy pay-to-win IAP cards removed with the old armory section. */
+.iap-grid, .iap-card { display: none; }

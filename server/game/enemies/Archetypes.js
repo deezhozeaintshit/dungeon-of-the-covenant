@@ -110,6 +110,7 @@ const BIOME_VARIANTS = {
 //   stealth       - starts encounters stealthed (assassin)
 //   pounce        - blink-strike special (assassin)
 //   healAlly      - support heal (caster)
+//   burnOnHit     - { duration, dps } ignite rider on melee hits (elite)
 // ----------------------------------------------------------------
 const ARCHETYPES = {
   skel_warrior: {
@@ -195,16 +196,32 @@ const ARCHETYPES = {
     targetPolicy: 'lowest_hp',
     canFlee: false, stealth: false, pounce: false, healAlly: false,
     volley: { bolts: 3, spread: 0.24, speed: 10.5, radius: 0.42, color: 0x00ddff }
+  },
+  cinder_thrall: {
+    role: 'elite',
+    name: 'Cinder Thrall',
+    model: 'cinder_thrall.glb',
+    modelScale: 1.25,
+    hp: 1100, damage: 46, damageType: 'fire', speed: 2.7,
+    aggroRange: 18, attackRange: 2.8, desiredRange: 2.4,
+    attackCooldown: 2.6, telegraphMs: 1100,
+    targetPolicy: 'highest_threat',
+    canFlee: false, stealth: false, pounce: false, healAlly: false,
+    // Forge burn rider: heavy melee hits ignite the player. duration = how
+    // long the burn lasts (s); dps = damage dealt each second while burning.
+    // Applied in Room.damagePlayer; ticked in the Room player loop.
+    burnOnHit: { duration: 5, dps: 7 }
   }
 };
 
 // Legacy mob type ids still emitted by Room.spawnMob today.
 // The coordinator migrates spawnMob() onto buildMobStats(); this map
 // keeps old ids resolving to the right archetype in the meantime.
+// (cinder_thrall used to alias rot_hound; it is now a canonical elite
+// archetype, so it resolves from ARCHETYPES directly.)
 const LEGACY_TYPE_MAP = {
   crypt_ghoul: 'rot_hound',
   bone_archer: 'cultist_archer',
-  cinder_thrall: 'rot_hound',
   void_assassin: 'void_assassin',
   blight_necrolyte: 'blight_necrolyte',
   elite_executioner: 'elite_executioner',
@@ -265,6 +282,7 @@ function buildMobStats(type, biomeId, floor) {
     slamAttack: base.slamAttack ? { ...base.slamAttack } : null,
     volley: base.volley ? { ...base.volley } : null,
     projectile: base.projectile ? { ...base.projectile } : null,
+    burnOnHit: base.burnOnHit ? { ...base.burnOnHit } : null,
     floor: Math.max(1, Math.floor(floor || 1))
   };
 }

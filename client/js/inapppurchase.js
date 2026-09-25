@@ -1,13 +1,31 @@
-// InAppPurchase.js - IAP Framework Stub for Future Implementation
-// Ready for integration with platform payment systems (Apple App Store, Google Play, Stripe, etc.)
+// inapppurchase.js — Covenant Cosmetic Shop purchase manager (web).
+//
+// Real Stripe Checkout flow, cosmetics only:
+//   1. init('web') loads /api/stripe/config -> shop availability + catalog.
+//   2. purchase(productId) creates a server-side Checkout session and redirects
+//      the tab to Stripe. Nothing is granted until Stripe confirms payment.
+//   3. handleCheckoutReturn() verifies the returning session server-side and
+//      refreshes entitlements.
+//   4. Entitlements/equip go through /api/shop/* (server-validated ownership).
+//
+// With no Stripe keys configured the shop reports shopAvailable:false and the
+// UI renders a "coming soon" state — the game stays fully playable, no errors.
+
+export class ShopUnavailableError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ShopUnavailableError';
+    this.code = 'STRIPE_NOT_CONFIGURED';
+  }
+}
 
 export class InAppPurchaseManager {
   constructor() {
     this.initialized = false;
-    this.platform = null; // 'ios', 'android', 'web', 'steam'
-    this.products = new Map();
-    this.purchases = new Map(); // productId -> purchaseState
-    this.transactions = [];
+    this.platform = 'web';
+    this.shopStatus = null;      // /api/stripe/config payload
+    this.entitlements = null;    // /api/shop/entitlements payload
+    this.lastError = null;
     this.listeners = {
       onPurchaseComplete: [],
       onPurchaseError: [],
@@ -16,272 +34,231 @@ export class InAppPurchaseManager {
     };
   }
 
-  // Initialize IAP for specific platform
-  async init(platform) {
-    this.platform = platform;
-    
-    switch (platform) {
-      case 'ios':
-        await this.initIOS();
-        break;
-      case 'android':
-        await this.initAndroid();
-        break;
-      case 'web':
-        await this.initWeb();
-        break;
-      default:
-        console.warn('InAppPurchaseManager: Unknown platform', platform);
+  get accountToken() {
+    try {
+      return localStorage.getItem('covenant_auth_token') || '';
+    } catch (e) {
+      return '';
     }
-    
+  }
+
+  async init(platform = 'web') {
+    this.platform = platform || 'web';
+    await this.refreshShopStatus();
     this.initialized = true;
-    this.loadProducts();
-  }
-
-  async initIOS() {
-    // Stub for StoreKit 2 integration
-    console.log('InAppPurchaseManager: iOS IAP initialized (stub)');
-  }
-
-  async initAndroid() {
-    // Stub for Google Play Billing integration
-    console.log('InAppPurchaseManager: Android IAP initialized (stub)');
-  }
-
-  async initWeb() {
-    try {
-      const resp = await fetch('/api/stripe/config');
-      if (resp.ok) {
-        this.stripeStatus = await resp.json();
-        console.log('InAppPurchaseManager: Stripe Web IAP initialized:', this.stripeStatus.mode);
-      }
-    } catch (err) {
-      console.warn('InAppPurchaseManager: Stripe config fetch error:', err);
-    }
-  }
-
-  async getStripeStatus() {
-    try {
-      const resp = await fetch('/api/stripe/config');
-      if (resp.ok) {
-        this.stripeStatus = await resp.json();
-        return this.stripeStatus;
-      }
-    } catch (err) {
-      console.warn('Stripe status fetch error:', err);
-    }
-    return { configured: false, mode: 'sandbox_ready', catalog: [] };
-  }
-
-  async configureStripeKeys(secretKey, publishableKey = '') {
-    const resp = await fetch('/api/stripe/configure-key', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ secretKey, publishableKey })
-    });
-    const data = await resp.json();
-    if (!resp.ok || !data.ok) {
-      throw new Error(data.error || 'Failed to save Stripe API keys');
-    }
-    this.stripeStatus = data.status;
-    return data.status;
-  }
-
-  // Register available products
-  registerProduct(productId, config) {
-    this.products.set(productId, {
-      id: productId,
-      name: config.name || productId,
-      description: config.description || '',
-      price: config.price || 0,
-      currency: config.currency || 'USD',
-      type: config.type || 'consumable', // 'consumable', 'non_consumable', 'subscription'
-      icon: config.icon || null,
-      metadata: config.metadata || {}
-    });
-    
-    this.notifyListeners('onProductLoad', productId);
-  }
-
-  // Load all registered products
-  async loadProducts() {
-    console.log('InAppPurchaseManager: Loading', this.products.size, 'products');
-    for (const [id, product] of this.products) {
+    const catalog = this.getCatalog();
+    for (const product of catalog) {
       this.notifyListeners('onProductLoad', product);
     }
+    return this.shopStatus;
   }
 
-  // Purchase a product
-  async purchase(productId) {
-    if (!this.initialized) {
-      console.error('InAppPurchaseManager: Not initialized');
-      this.notifyListeners('onPurchaseError', new Error('Not initialized'));
-      return false;
-    }
-
-    const product = this.products.get(productId) || { id: productId, name: productId };
-
+  async refreshShopStatus() {
     try {
-      let success = false;
-      switch (this.platform) {
-        case 'ios':
-          success = await this.purchaseIOS(productId);
-          break;
-        case 'android':
-          success = await this.purchaseAndroid(productId);
-          break;
-        case 'web':
-          success = await this.purchaseWeb(productId);
-          break;
-        default:
-          success = true;
-      }
+      const resp = await fetch('/api/stripe/config', { cache: 'no-store' });
+      if (!resp.ok) throw new Error(`config HTTP ${resp.status}`);
+      this.shopStatus = await resp.json();
+    } catch (err) {
+      // Offline / server hiccup: degrade to "coming soon", never crash.
+      console.warn('InAppPurchaseManager: shop status unavailable:', err.message);
+      this.shopStatus = { shopAvailable: false, mode: 'unconfigured', catalog: [] };
+    }
+    return this.shopStatus;
+  }
 
-      if (success) {
-        this.purchases.set(productId, 'purchased');
-        this.transactions.push({
-          productId,
-          timestamp: Date.now(),
-          platform: this.platform,
-          success: true
-        });
-        this.notifyListeners('onPurchaseComplete', product);
-        return true;
-      }
-    } catch (error) {
-      console.error('InAppPurchaseManager: Purchase failed:', error);
-      this.notifyListeners('onPurchaseError', error);
+  isShopAvailable() {
+    return Boolean(this.shopStatus && this.shopStatus.shopAvailable);
+  }
+
+  getCatalog() {
+    return (this.shopStatus && Array.isArray(this.shopStatus.catalog))
+      ? this.shopStatus.catalog
+      : [];
+  }
+
+  getProduct(productId) {
+    return this.getCatalog().find(p => p.id === productId) || null;
+  }
+
+  // Start a real Stripe Checkout for a catalog product. Redirects the current
+  // tab to Stripe; the return URL carries ?stripe_success=1&session_id=...
+  async purchase(productId) {
+    if (!this.initialized) await this.init('web');
+    const product = this.getProduct(productId);
+    if (!product) {
+      const err = new Error('Unknown product. Please refresh the shop.');
+      this.notifyListeners('onPurchaseError', err);
+      throw err;
+    }
+    if (!this.accountToken) {
+      const err = new Error('Sign in to your Covenant account before purchasing cosmetics.');
+      this.notifyListeners('onPurchaseError', err);
+      throw err;
     }
 
-    return false;
-  }
+    let playerName = 'Hero';
+    try {
+      playerName = document.getElementById('player-name-input')?.value || 'Hero';
+    } catch (e) { /* headless / DOM-less */ }
 
-  async purchaseIOS(productId) {
-    return true;
-  }
-
-  async purchaseAndroid(productId) {
-    return true;
-  }
-
-  async purchaseWeb(productId) {
-    const accountToken = localStorage.getItem('covenant_auth_token') || '';
-    const playerName = document.getElementById('player-name-input')?.value || 'Vanguard';
     const resp = await fetch('/api/stripe/create-checkout-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ productId, accountToken, playerName, originUrl: window.location.origin })
+      body: JSON.stringify({
+        productId,
+        accountToken: this.accountToken,
+        playerName,
+        originUrl: (typeof window !== 'undefined' && window.location) ? window.location.origin : ''
+      })
     });
-    const data = await resp.json();
+    const data = await resp.json().catch(() => ({}));
     if (!resp.ok || !data.ok) {
-      throw new Error(data.error || 'Stripe checkout failed');
+      const err = (data && data.code === 'STRIPE_NOT_CONFIGURED')
+        ? new ShopUnavailableError(data.error || 'The cosmetic shop is coming soon.')
+        : new Error((data && data.error) || 'Could not start Stripe checkout.');
+      this.lastError = err;
+      this.notifyListeners('onPurchaseError', err);
+      throw err;
+    }
+    if (!data.checkoutUrl) {
+      const err = new Error('Stripe did not return a checkout URL.');
+      this.notifyListeners('onPurchaseError', err);
+      throw err;
     }
 
-    // If a live/test Stripe API Checkout URL was returned by api.stripe.com, open Stripe Checkout in a new tab while equipping the item immediately!
-    if (data.checkoutUrl && data.mode === 'stripe_live') {
-      window.open(data.checkoutUrl, '_blank', 'noopener,noreferrer');
+    // Same-tab redirect: Stripe returns the buyer to ?stripe_success=1, which
+    // handleCheckoutReturn() verifies server-side before granting anything.
+    if (typeof window !== 'undefined' && window.location) {
+      window.location.href = data.checkoutUrl;
     }
-    this.lastStripeSession = data;
-    return true;
+    return data;
   }
 
-  // Restore previous purchases
-  async restorePurchases() {
-    if (!this.initialized) return;
+  // Called on page load. Returns { status: 'verified'|'cancelled'|'none', ... }.
+  // Verification is server-side (Stripe API); only a paid session grants.
+  async handleCheckoutReturn() {
+    if (typeof window === 'undefined') return { status: 'none' };
+    const params = new URLSearchParams(window.location.search);
+    const cleanUrl = () => {
+      try {
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } catch (e) { /* noop */ }
+    };
 
-    try {
-      let restored = 0;
-      
-      switch (this.platform) {
-        case 'ios':
-          restored = await this.restoreIOS();
-          break;
-        case 'android':
-          restored = await this.restoreAndroid();
-          break;
-        case 'web':
-          restored = await this.restoreWeb();
-          break;
+    if (params.get('stripe_cancel') === '1') {
+      cleanUrl();
+      return { status: 'cancelled' };
+    }
+    if (params.get('stripe_success') === '1') {
+      const sessionId = params.get('session_id') || '';
+      cleanUrl();
+      if (!sessionId) return { status: 'none' };
+      try {
+        const resp = await fetch('/api/stripe/verify-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, accountToken: this.accountToken })
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (data && data.ok && data.verified) {
+          await this.fetchEntitlements();
+          const product = this.getProduct(data.productId);
+          this.notifyListeners('onPurchaseComplete', product || { id: data.productId });
+          return { status: 'verified', productId: data.productId, alreadyGranted: Boolean(data.alreadyGranted) };
+        }
+        const err = new Error((data && data.error) || 'Payment could not be verified.');
+        this.notifyListeners('onPurchaseError', err);
+        return { status: 'failed', error: err.message };
+      } catch (err) {
+        this.notifyListeners('onPurchaseError', err);
+        return { status: 'failed', error: err.message };
       }
-
-      this.notifyListeners('onRestoreComplete', restored);
-    } catch (error) {
-      console.error('InAppPurchaseManager: Restore failed:', error);
     }
+    return { status: 'none' };
   }
 
-  async restoreIOS() {
-    // Stub: Implement with StoreKit receipt validation
-    return 0;
+  async fetchEntitlements() {
+    if (!this.accountToken) {
+      this.entitlements = null;
+      return null;
+    }
+    try {
+      const resp = await fetch(`/api/shop/entitlements?token=${encodeURIComponent(this.accountToken)}`, { cache: 'no-store' });
+      const data = await resp.json().catch(() => ({}));
+      if (data && data.ok) {
+        this.entitlements = data.entitlements;
+        this.notifyListeners('onRestoreComplete', this.entitlements);
+        return this.entitlements;
+      }
+    } catch (err) {
+      console.warn('InAppPurchaseManager: entitlement fetch failed:', err.message);
+    }
+    return null;
   }
 
-  async restoreAndroid() {
-    // Stub: Implement with Google Play purchase history
-    return 0;
+  // Server-validated equip. kind: 'skin' | 'weaponGlow'. cosmeticId may be null
+  // to unequip. Returns the updated entitlements on success.
+  async equip(kind, cosmeticId) {
+    const resp = await fetch('/api/shop/equip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ accountToken: this.accountToken, kind, cosmeticId: cosmeticId || null })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      throw new Error((data && data.error) || 'Could not equip cosmetic.');
+    }
+    this.entitlements = data.entitlements;
+    return data.entitlements;
   }
 
-  async restoreWeb() {
-    // Stub: Implement with server-side receipt validation
-    return 0;
+  ownsCosmetic(kind, cosmeticId) {
+    if (!this.entitlements || !cosmeticId) return false;
+    if (kind === 'skin') return (this.entitlements.ownedSkins || []).includes(cosmeticId);
+    if (kind === 'weaponGlow') return (this.entitlements.ownedWeaponGlows || []).includes(cosmeticId);
+    if (kind === 'emote') return (this.entitlements.ownedEmotes || []).includes(cosmeticId);
+    return false;
   }
 
-  // Check if product is owned
-  isOwned(productId) {
-    return this.purchases.get(productId) === 'purchased';
+  isEquipped(kind, cosmeticId) {
+    if (!this.entitlements || !cosmeticId) return false;
+    if (kind === 'skin') return this.entitlements.equippedSkin === cosmeticId;
+    if (kind === 'weaponGlow') return this.entitlements.equippedWeaponGlow === cosmeticId;
+    return false;
   }
 
-  // Get product info
-  getProduct(productId) {
-    return this.products.get(productId);
+  // Legacy alias kept for older UI wiring: re-syncs entitlements from server.
+  async restorePurchases() {
+    const ent = await this.fetchEntitlements();
+    return ent;
   }
 
-  // Get all products
-  getAllProducts() {
-    return Array.from(this.products.values());
-  }
-
-  // Register event listener
   on(event, callback) {
-    if (this.listeners[event]) {
-      this.listeners[event].push(callback);
-    }
+    if (this.listeners[event]) this.listeners[event].push(callback);
   }
 
-  // Remove event listener
   off(event, callback) {
     if (this.listeners[event]) {
       const idx = this.listeners[event].indexOf(callback);
-      if (idx !== -1) {
-        this.listeners[event].splice(idx, 1);
-      }
+      if (idx !== -1) this.listeners[event].splice(idx, 1);
     }
   }
 
-  // Notify all listeners
   notifyListeners(event, data) {
     const callbacks = this.listeners[event];
     if (callbacks) {
       for (const callback of callbacks) {
-        try {
-          callback(data);
-        } catch (error) {
+        try { callback(data); } catch (error) {
           console.error('InAppPurchaseManager: Listener error:', error);
         }
       }
     }
   }
 
-  // Get transaction history
-  getTransactions() {
-    return [...this.transactions];
-  }
-
-  // Cleanup
   destroy() {
-    this.listeners = { onPurchaseComplete: [], onPurchaseError: [], onProductLoad: [], onRestoreComplete: [] };
-    this.products.clear();
-    this.purchases.clear();
-    this.transactions.clear();
+    this.listeners = { onPurchaseComplete: [], onPurchaseError: [], onRestoreComplete: [], onProductLoad: [] };
+    this.shopStatus = null;
+    this.entitlements = null;
     this.initialized = false;
   }
 }
