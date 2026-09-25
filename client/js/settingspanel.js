@@ -79,6 +79,15 @@ export class SettingsPanel {
               <span id="bloom-value">0.8</span>
             </div>
             <div class="setting-row">
+              <label>Effects Quality</label>
+              <select id="setting-fxquality">
+                <option value="auto" selected>Auto (Recommended)</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+                <option value="off">Off</option>
+              </select>
+            </div>
+            <div class="setting-row">
               <label>Shadow Quality</label>
               <select id="setting-shadows">
                 <option value="low">Low (512px)</option>
@@ -96,7 +105,7 @@ export class SettingsPanel {
             </div>
             <div class="setting-row">
               <label>Reduced Motion</label>
-              <input type="checkbox" id="setting-reducedmotion">
+              <input type="checkbox" id="setting-reducedmotion" ${this.game.qol?.features.reducedMotion ? 'checked' : ''}>
             </div>
           </div>
           <!-- Controls Settings -->
@@ -240,8 +249,22 @@ export class SettingsPanel {
     document.getElementById('setting-bloom')?.addEventListener('input', (e) => {
       const value = e.target.value / 100;
       document.getElementById('bloom-value').textContent = value.toFixed(1);
-      if (this.game.renderer) {
+      if (this.game.renderer && typeof this.game.renderer.setBloomIntensity === 'function') {
         this.game.renderer.setBloomIntensity(value);
+      }
+    });
+
+    // Effects quality: off / low / high / auto (auto degrades on fps drops)
+    document.getElementById('setting-fxquality')?.addEventListener('change', (e) => {
+      if (this.game.renderer && typeof this.game.renderer.setQuality === 'function') {
+        this.game.renderer.setQuality(e.target.value);
+      }
+    });
+
+    // Particle quality: scales the pooled VFX spawn budgets
+    document.getElementById('setting-particles')?.addEventListener('change', (e) => {
+      if (this.game.feelFX && typeof this.game.feelFX.setParticleBudget === 'function') {
+        this.game.feelFX.setParticleBudget(e.target.value);
       }
     });
 
@@ -249,6 +272,10 @@ export class SettingsPanel {
     document.getElementById('setting-reducedmotion')?.addEventListener('change', (e) => {
       if (this.game.qol) {
         this.game.qol.toggleReducedMotion();
+      }
+      // Keep the checkbox honest if qol is absent: drive the renderer directly.
+      if (!this.game.qol && this.game.renderer && typeof this.game.renderer.setReducedMotion === 'function') {
+        this.game.renderer.setReducedMotion(e.target.checked);
       }
     });
 

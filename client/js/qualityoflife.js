@@ -43,8 +43,9 @@ export class QualityOfLife {
   toggleReducedMotion() {
     this.features.reducedMotion = !this.features.reducedMotion;
     this.saveSettings();
-    if (this.features.reducedMotion && this.game.renderer) {
-      this.game.renderer.shakeIntensity *= 0.3;
+    // Phase 3 game feel: hard-disable trauma shake + hit-stop on the renderer.
+    if (this.game.renderer && typeof this.game.renderer.setReducedMotion === 'function') {
+      this.game.renderer.setReducedMotion(this.features.reducedMotion);
     }
     this.notifyListeners('onFeatureToggle', { feature: 'reducedMotion', value: this.features.reducedMotion });
     return this.features.reducedMotion;
@@ -82,6 +83,10 @@ export class QualityOfLife {
         const settings = JSON.parse(raw);
         Object.assign(this.features, settings);
         this.applyHighContrast();
+      } else if (typeof window !== 'undefined' && window.matchMedia &&
+                 window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        // Phase 3 (WCAG 2.1 AA): no saved choice yet — honor the OS signal.
+        this.features.reducedMotion = true;
       }
     } catch (e) {
       console.warn('QualityOfLife: Failed to load settings:', e);
