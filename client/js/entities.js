@@ -5,6 +5,8 @@ import { GLTFLoader } from '/vendor/addons/loaders/GLTFLoader.js';
 import { upgradeCharacterMaterials, buildCharacterEnvMap, applyEnvMapToGroup } from './characterMaterials.js?v=9.0';
 import { ensureCombatAnimState, triggerHitFlash, triggerAttackLunge, triggerDeathFade, resetDeathFade, updateCombatAnimation, detectDamage } from './characterAnimation.js?v=9.0';
 import { enableCharacterLightLayer, attachBlobShadow, updateCharacterLighting } from './characterLighting.js?v=9.0';
+// Phase 2 (workstream 2): game-wide animation state machine (Mixamo clips + procedural fallback).
+import { createAnimator } from './animation/AnimationStates.js';
 
 export class EntityManager {
   constructor(scene) {
@@ -40,6 +42,10 @@ export class EntityManager {
     enableCharacterLightLayer(group);
     attachBlobShadow(group, shadowRadius, shadowOpacity);
     ensureCombatAnimState(group);
+    // Phase 2: attach the game-wide animation state machine. The Mixamo clip
+    // set is bound later in main.js boot (bindClipSet); until then the
+    // animator drives procedural fallback poses.
+    group.userData.animator = createAnimator(group);
     return group;
   }
 
@@ -285,8 +291,14 @@ export class EntityManager {
   triggerAttackAnimation(playerId) {
     const group = this.playerMeshes.get(playerId);
     if (group && group.userData) {
-      group.userData.attackTimer = 0.28;
-      triggerAttackLunge(group); // characters track: root forward lunge
+      // Phase 2: the animator plays a real attack clip (or procedural upper-layer
+      // swing); legacy lunge only for non-animator groups.
+      if (group.userData.animator) {
+        group.userData.animator.play('attack');
+      } else {
+        group.userData.attackTimer = 0.28;
+        triggerAttackLunge(group); // characters track: root forward lunge
+      }
     }
   }
 
@@ -971,6 +983,8 @@ export class EntityManager {
       }
 
       group.position.lerp(new THREE.Vector3(m.x, m.y || 0, m.z), 0.35);
+      // Phase 2: movement tracking for the animation state machine.
+      group.userData.isMoving = Math.hypot(m.x - group.position.x, m.z - group.position.z) > 0.05;
       this.updateOverheadBar(group, m.hp, m.maxHp, m.name, true, false);
       detectDamage(group, m.hp); // characters track: hit flash on hp drop
 
@@ -1308,6 +1322,8 @@ export class EntityManager {
     }
 
     this.bossMesh.position.lerp(new THREE.Vector3(bossData.x, bossData.y || 0, bossData.z), 0.35);
+    // Phase 2: movement tracking for the animation state machine.
+    this.bossMesh.userData.isMoving = Math.hypot(bossData.x - this.bossMesh.position.x, bossData.z - this.bossMesh.position.z) > 0.08;
     if (bossData.rotation !== undefined) {
       this.bossMesh.rotation.y = bossData.rotation;
     }
@@ -1533,6 +1549,16 @@ export class EntityManager {
       const u = group.userData;
       if (!u || !u.leftLeg || !u.rightLeg) continue;
 
+      // Phase 2: the animation state machine owns locomotion + procedural
+      // fallback; legacy bone-tweening runs only for animator-less groups.
+      if (u.animator) {
+        u.animator.setLocomotion({ moving: !!u.isMoving, running: !!u.isRunning });
+        u.animator.update(dt);
+        // characters track: hit flash, attack lunge, death fade
+        updateCombatAnimation(group, dt);
+        continue;
+      }
+
       u.idlePhase += dt * 2.8;
       const baseY = u.baseLevitateY || 0;
 
@@ -1626,6 +1652,14 @@ export class EntityManager {
     for (const mobGroup of this.mobMeshes.values()) {
       const mu = mobGroup.userData;
       if (!mu) continue;
+      // Phase 2: the animation state machine owns locomotion; legacy
+      // ambient motion only for animator-less groups.
+      if (mu.animator) {
+        mu.animator.setLocomotion({ moving: !!mu.isMoving, running: false });
+        mu.animator.update(dt);
+        updateCombatAnimation(mobGroup, dt);
+        continue;
+      }
       mu.phase = (mu.phase || 0) + dt * 3.0;
       if (mu.orbitGroup) {
         mu.orbitGroup.rotation.y += dt * 2.8;
@@ -1638,8 +1672,14 @@ export class EntityManager {
     }
 
     // 4. Boss combat animation (death tip-over + fade) & character lighting rig
-    if (this.bossMesh && this.bossMesh.userData.bodyGroup) {
-      updateCombatAnimation(this.bossMesh.userData.bodyGroup, dt);
+    if (this.bossMesh) {
+      const bu = this.bossMesh.userData;
+      // Phase 2: the animation state machine drives boss locomotion.
+      if (bu.animator) {
+        bu.animator.setLocomotion({ moving: !!bu.isMoving, running: false });
+        bu.animator.update(dt);
+      }
+      if (bu.bodyGroup) updateCombatAnimation(bu.bodyGroup, dt);
     }
     updateCharacterLighting(dt, performance.now() / 1000);
   }

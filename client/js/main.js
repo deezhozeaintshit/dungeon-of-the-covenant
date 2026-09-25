@@ -22,6 +22,13 @@ import { initCharacterSelect } from './ui/characterSelect.js?v=5.0';
 import { initHUD } from './ui/hud.js?v=5.0';
 import { initScreens } from './ui/screens.js?v=5.0';
 import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
+// Phase 2: enemy visuals (telegraphs / spawn / boss phases), game-wide
+// animation (Mixamo clips + procedural fallback), progression UI
+// (level-up choices, skill tree, death-respawn), and oath shrines.
+import { EnemyVisuals } from './enemies.js';
+import { loadClipSet } from './animation/MixamoRig.js';
+import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
+import { initOathModal } from './ui/oathModal.js';
 
 const _projV = new THREE.Vector3(); // shared projector scratch vector
 
@@ -163,7 +170,8 @@ class GameApp {
     this.ui.hud = initHUD({ game: this });
     this.ui.screens = initScreens({
       onOpenSettings: () => this.ui.menu?.openSettings(),
-      onRespawn: () => { if (this.network) this.network.sendInput({ action: 'respawn' }); },
+      // Phase 2: server-authoritative respawn (Health.requestRespawn).
+      onRespawn: () => { if (this.network) this.network.send({ type: 'respawn_request' }); },
       onQuitToLobby: () => window.location.reload(),
     });
     this.ui.damageNumbers = initDamageNumbers();
@@ -210,6 +218,41 @@ class GameApp {
       });
     } catch (err) {
       console.error('3D Renderer initialization error:', err);
+    }
+
+    // Phase 2: enemy telegraph / spawn / boss-phase visuals (workstream 2).
+    try {
+      this.enemyVisuals = new EnemyVisuals(this.renderer.scene, {
+        getMobMesh: (id) => (this.entities && this.entities.mobMeshes ? this.entities.mobMeshes.get(id) : null)
+      });
+    } catch (err) {
+      console.warn('[Phase2] EnemyVisuals init failed:', err);
+      this.enemyVisuals = null;
+    }
+
+    // Phase 2: level-up choices, skill tree, death-respawn (workstream 5).
+    this.levelUpModal = initLevelUpModal({
+      onPick: (abilityId) => { if (this.network) this.network.send({ type: 'ability_pick', abilityId }); }
+    });
+    this.skillTreePanel = initSkillTreePanel({
+      onSpend: (abilityId) => { if (this.network) this.network.send({ type: 'skill_tree_spend', abilityId }); }
+    });
+    bindRespawnButton({
+      onRequest: () => { if (this.network) this.network.send({ type: 'respawn_request' }); }
+    });
+
+    // Phase 2: oath shrines + modal (workstream 6). The module's ws handlers
+    // subscribe as secondary listeners so the main callback map stays intact.
+    this.oathUI = initOathModal({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      scene: this.renderer ? this.renderer.scene : null,
+      getLocalPlayerId: () => this.localPlayerId
+    });
+    if (this.oathUI && this.oathUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.oathUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
     }
 
     // Start Animation Loop
@@ -1191,6 +1234,41 @@ class GameApp {
       },
       error: (msg) => {
         alert(msg.message);
+      },
+      // Phase 2: enemy visuals — telegraphs, spawn preloads, boss spawns/phases.
+      enemy_telegraph: (msg) => { if (this.enemyVisuals) this.enemyVisuals.handleMessage(msg); },
+      enemy_spawn: (msg) => { if (this.enemyVisuals) this.enemyVisuals.handleMessage(msg); },
+      boss_spawn: (msg) => { if (this.enemyVisuals) this.enemyVisuals.handleMessage(msg); },
+      boss_phase: (msg) => { if (this.enemyVisuals) this.enemyVisuals.handleMessage(msg); },
+      // Phase 2: progression — level-up blessing choices (local player only).
+      level_up_choices: (msg) => {
+        if (msg.playerId && msg.playerId !== this.localPlayerId) return;
+        if (this.levelUpModal) this.levelUpModal.show({ level: msg.level || 1, choices: msg.choices || [] });
+        this.audio.playSFX('levelup');
+        this.narrator.say(`LEVEL ${msg.level || 1}! Choose your covenant blessing!`, 'info');
+      },
+      // Phase 2: ability build changed — re-render the skill tree (local player only).
+      build_update: (msg) => {
+        if (msg.playerId && msg.playerId !== this.localPlayerId) return;
+        if (this.skillTreePanel) this.skillTreePanel.render(msg.build, msg.classKey || this.selectedClass);
+        this.narrator.say('Covenant blessing chosen.', 'info');
+      },
+      xp_update: (msg) => {
+        // XP bar is refreshed from the authoritative snapshot; this event is
+        // the live-feed hook for HUD damage-number style systems.
+        if (msg.playerId && msg.playerId !== this.localPlayerId) return;
+        updateXPBar({ level: msg.level || 1, xp: msg.xp || 0, nextLevelXp: msg.nextLevelXp || 100 });
+      },
+      // Phase 2: server-authoritative death/respawn countdown on the death screen.
+      player_died: (msg) => {
+        if (msg.playerId === this.localPlayerId) renderRespawnCountdown(msg.respawnIn || 0);
+        this.narrator.say(`${msg.playerName || 'A hero'} has fallen!`, 'danger');
+        this.audio.playSFX('hurt');
+      },
+      player_respawned: (msg) => {
+        if (msg.playerId === this.localPlayerId) renderRespawnCountdown(0);
+        this.narrator.say(`${msg.playerName || 'A hero'} rises again!`, 'info');
+        this.audio.playSFX('powerup');
       }
     });
   }
@@ -1309,12 +1387,43 @@ class GameApp {
     // 1. Sync Players
     this.entities.syncPlayers(snap.players, this.localPlayerId);
 
+    // Phase 2 (workstream 2): bind the Mixamo clip set to the local hero once
+    // its group exists. Procedural fallback drives the animator until then.
+    if (!this._clipSetBound) {
+      const localMesh = this.entities.playerMeshes.get(this.localPlayerId);
+      if (localMesh && localMesh.userData.animator) {
+        this._clipSetBound = 'loading';
+        (async () => {
+          try {
+            const set = await loadClipSet(`hero_${this.selectedClass || 'mage'}`, localMesh);
+            localMesh.userData.animator.bindClipSet(set);
+            localMesh.userData.animator.refresh();
+            this._clipSetBound = true;
+          } catch (err) {
+            console.warn('[Phase2] clip set load failed; procedural fallback active:', err);
+            this._clipSetBound = false; // retry on the next snapshot
+          }
+        })();
+      }
+    }
+
     // 2. Sync Mobs
     this.entities.syncMobs(snap.mobs);
 
     // 3. Sync Boss
     this.entities.syncBoss(snap.boss);
     this.updateBossHUD(snap.boss);
+
+    // Phase 2: elite auras + boss phase bar/ring (workstream 2).
+    if (this.enemyVisuals) {
+      this.enemyVisuals.syncElites(snap.mobs);
+      this.enemyVisuals.syncBoss(snap.boss);
+    }
+
+    // Phase 2: oath shrine 3D nodes (workstream 6).
+    if (this.oathUI && Array.isArray(snap.shrines)) {
+      this.oathUI.syncShrines(snap.shrines);
+    }
 
     // 4. Sync Projectiles & Ground Effects
     this.combat.syncProjectiles(snap.projectiles);
@@ -1331,6 +1440,8 @@ class GameApp {
       const lp = snap.players.find(p => p.id === this.localPlayerId);
       if (lp) {
         this.ui.hud.updateVitals({ hp: lp.hp, maxHp: lp.maxHp, mana: lp.mana, maxMana: lp.maxMana });
+        // Phase 2: XP/level/ability-point bar from the authoritative snapshot.
+        updateXPBar({ level: lp.level || 1, xp: lp.xp || 0, nextLevelXp: lp.nextLevelXp || 100 });
         if (this.ui.screens) {
           if (lp.isDowned && !this.ui.screens.death.isOpen) {
             this.ui.screens.death.show({ floor: snap.floor ?? 1 });
@@ -1544,6 +1655,9 @@ class GameApp {
     this.combat.update(dt);
     this.loot.update(dt);
     this.entities.update(dt);
+    // Phase 2: enemy telegraph/progress visuals + oath shrine proximity tick.
+    if (this.enemyVisuals) this.enemyVisuals.update(dt);
+    if (this.oathUI) this.oathUI.tick(dt, time * 0.001);
     // levels track: biome atmosphere tick (fog, torch flicker, particles)
     if (this.dungeon && typeof this.dungeon.update === 'function') {
       this.dungeon.update(dt, time * 0.001);
