@@ -30,7 +30,12 @@ export const STATIC_PROP_TYPES = new Set([
   'stalagmite', 'stalactite_cluster', 'rock_spire',
   'anvil', 'hanging_chain',
   'throne', 'grand_pillar', 'banner', 'chest',
-  'rubble'
+  'rubble',
+  // Biome-dressing pass (level design): all static, instanced, LOD-gated.
+  'broken_pillar', 'tattered_banner', 'floor_decal',
+  'ember_crystal',
+  'weapon_rack', 'chain_curtain', 'brazier_cold',
+  'statue', 'tall_banner'
 ]);
 
 const VARIANTS = 1; // single template variant; per-instance rot/scale/tint is the anti-tiling mechanism

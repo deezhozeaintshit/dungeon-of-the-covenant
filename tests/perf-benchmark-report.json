@@ -1,27 +1,27 @@
 {
-  "generated": "2026-09-25T20:04:54.309Z",
+  "generated": "2026-09-25T20:32:57.953Z",
   "note": "Headless node benchmark: no GPU. Draw calls/triangles counted analytically from the scene graph (matches renderer.info semantics). UnrealBloomPass GPU cost not measurable here; the auto-degrade path that sheds it is verified in section D.",
   "baseline": {
-    "calls": 1367,
-    "triangles": 60757
+    "calls": 1248,
+    "triangles": 68431
   },
   "optimizedTypicalView": {
-    "calls": 718,
-    "triangles": 47933
+    "calls": 701,
+    "triangles": 57509
   },
   "optimizedFarView": {
     "calls": 470,
-    "triangles": 29940
+    "triangles": 42172
   },
-  "drawCallReductionTypical": 0.475,
+  "drawCallReductionTypical": 0.438,
   "instancing": {
-    "types": 15,
-    "instancedMeshes": 83,
-    "instances": 78
+    "types": 26,
+    "instancedMeshes": 56,
+    "instances": 118
   },
   "cinderGLBVerts": 37074,
   "cinderImpostorTris": 254,
-  "cpuLogicMsPerFrame": 0.471,
+  "cpuLogicMsPerFrame": 0.455,
   "entitiesUpdateIncluded": true,
   "checks": [
     {
@@ -132,7 +132,7 @@
     {
       "name": "per-frame JS logic < 8ms (leaves headroom for GPU)",
       "pass": true,
-      "detail": "0.47 ms"
+      "detail": "0.46 ms"
     }
   ]
 }
