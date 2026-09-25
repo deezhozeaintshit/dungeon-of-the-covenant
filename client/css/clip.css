@@ -1,0 +1,155 @@
+/* clip.css — Phase 4 (workstream 3): clip button + preview modal styles.
+   Dark-fantasy, matches the HUD theme. WCAG 2.1 AA: visible focus on every
+   control, gold-on-black contrast for text, no color-only cues. */
+
+/* ---- HUD clip button (injected as #btn-clip, .secret-tab-btn styled) ---- */
+#btn-clip .secret-icon { color: #ffd970; }
+
+#btn-clip.clip-recording .secret-icon {
+  animation: clip-rec-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes clip-rec-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Suggestion pulse after epic moments: ring glow, motion-safe. */
+#btn-clip.clip-pulse {
+  animation: clip-pulse-ring 1.2s ease-out 3;
+  border-color: #ffd970;
+}
+
+@keyframes clip-pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(255, 217, 112, 0.65); }
+  100% { box-shadow: 0 0 0 12px rgba(255, 217, 112, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #btn-clip.clip-recording .secret-icon { animation: none; }
+  #btn-clip.clip-pulse { animation: none; border-color: #ffd970; }
+}
+
+/* Fallback floating button when HUD markup is missing. */
+.clip-fab {
+  position: fixed;
+  right: 16px;
+  bottom: 96px;
+  z-index: 9000;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  font-size: 1.4rem;
+  background: #14101f;
+  border: 1.5px solid #8a6d2f;
+  color: #ffd970;
+  cursor: pointer;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.55);
+}
+
+/* ---- Visible keyboard focus (AA) ---- */
+#btn-clip:focus-visible,
+.clip-fab:focus-visible,
+.clip-btn:focus-visible,
+.clip-preview-video:focus-visible {
+  outline: 3px solid #ffd970;
+  outline-offset: 2px;
+}
+
+/* ---- Preview modal ---- */
+.clip-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  background: rgba(4, 2, 10, 0.78);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.clip-modal {
+  width: min(560px, 94vw);
+  max-height: 92vh;
+  overflow-y: auto;
+  background: #12101c;
+  border: 1.5px solid #8a6d2f;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.7), 0 0 40px rgba(212, 175, 55, 0.08);
+  color: #e8e2d4;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.clip-modal-narrow { width: min(420px, 94vw); }
+
+.clip-modal-title {
+  font-family: 'Cinzel', serif;
+  font-size: 1.25rem;
+  color: #ffd970;
+  margin: 0 0 12px;
+  letter-spacing: 0.04em;
+}
+
+.clip-preview-video {
+  width: 100%;
+  max-height: 46vh;
+  border-radius: 8px;
+  background: #000;
+  border: 1px solid #3a2f1c;
+  display: block;
+}
+
+.clip-modal-meta {
+  font-size: 0.8rem;
+  color: #b8ad8f;
+  margin: 10px 0 4px;
+}
+
+.clip-privacy-note {
+  font-size: 0.8rem;
+  color: #9fd6a8;
+  background: rgba(46, 125, 63, 0.14);
+  border: 1px solid rgba(46, 125, 63, 0.45);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin: 8px 0 0;
+  line-height: 1.45;
+}
+
+.clip-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.clip-btn {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1.5px solid #8a6d2f;
+  background: #1d1828;
+  color: #f0e9d6;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: filter 0.15s ease, transform 0.1s ease;
+}
+
+.clip-btn:hover { filter: brightness(1.25); }
+.clip-btn:active { transform: scale(0.96); }
+
+.clip-btn-primary {
+  background: #3a2c10;
+  border-color: #d4af37;
+  color: #ffd970;
+}
+
+.clip-btn-danger { border-color: #7a2a2a; color: #ffb3b3; }
+.clip-btn-danger.armed {
+  background: #4a1414;
+  border-color: #ff5a5a;
+  color: #ffffff;
+}

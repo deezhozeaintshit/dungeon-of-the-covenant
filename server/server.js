@@ -12,6 +12,14 @@ const stripeService = require('./stripeService');
 const authService = require('./authService');
 // Phase 3 meta-progression (workstream 5): persistent account ranks + unlocks.
 const MetaProgression = require('./game/systems/MetaProgression');
+// Phase 4 seasons + battle pass + weekly leaderboards (workstream 1):
+// server-authoritative seasons, cosmetics-only pass, daily-delve seeding.
+const SeasonService = require('./game/systems/SeasonService');
+const BattlePass = require('./game/systems/BattlePass');
+const Leaderboards = require('./game/systems/Leaderboards');
+// Phase 4 Endless Rift mode (workstream 4): server-authoritative tier
+// scaling, affixes, keystone entry economy, rift leaderboards.
+const Rift = require('./game/systems/Rift');
 
 const PORT = process.env.PORT || 3000;
 const app = express();
@@ -232,6 +240,325 @@ app.post('/api/shop/equip', (req, res) => {
 });
 
 // ============================================================================
+// 2b. SEASONS, BATTLE PASS, DAILY DELVE & WEEKLY LEADERBOARDS (Phase 4,
+//     workstream 1).
+//
+// COSMETICS ONLY — NEVER PAY-TO-WIN. Every battle-pass tier reward grants
+// exactly one cosmetic (hero skin, weapon glow, or emote): zero gameplay
+// stats. Season XP is earned ONLY from server-observed run results (see
+// MetaProgression.grantRunRewards) — no endpoint accepts client-sent XP.
+// Leaderboard values are measured server-side (clear times from room
+// timestamps, rift tiers from the rift system, season XP from run rewards).
+// ============================================================================
+
+// Public: current season identity + today's deterministic delve seed.
+app.get('/api/season/state', (req, res) => {
+  res.json({
+    ok: true,
+    ...SeasonService.publicSeasonState(),
+    passNotice: BattlePass.COSMETICS_ONLY_NOTICE
+  });
+});
+
+// Battle-pass-exclusive cosmetic defs — merged into the client's cosmeticDefs
+// map so pass rewards render on heroes. Presentation data only.
+app.get('/api/pass/cosmetics', (req, res) => {
+  res.json({ ok: true, defs: BattlePass.publicExclusiveDefs() });
+});
+
+// Account's pass state (season XP, tier, claimed/unclaimed per tier/track).
+app.get('/api/pass/state', (req, res) => {
+  const acc = metaAccount(req, res);
+  if (!acc) return;
+  res.json(BattlePass.getPassState(metaToken(req)));
+});
+
+// Claim a tier reward. Server-validated: tier reached, premium gate, no
+// double-claim. The season id is always the current season.
+app.post('/api/pass/claim', (req, res) => {
+  const acc = metaAccount(req, res);
+  if (!acc) return;
+  const { track, tier } = req.body || {};
+  const result = BattlePass.claimTier(metaToken(req), track, tier);
+  if (!result.ok) {
+    return res.status(400).json(result);
+  }
+  res.json(result);
+});
+
+// Start a Stripe Checkout for the season-pass premium product. Reuses the
+// Phase 3 cosmetic-shop billing: nothing is granted at checkout time — the
+// entitlement lands only after Stripe confirms payment (webhook or verify).
+app.post('/api/pass/checkout', async (req, res) => {
+  const token = metaToken(req);
+  const acc = metaAccount(req, res);
+  if (!acc) return;
+  try {
+    const season = SeasonService.getCurrentSeason();
+    if (SeasonService.hasPremium(acc.profile, season.id)) {
+      return res.status(400).json({ ok: false, error: 'You already hold premium for this season.' });
+    }
+    const origin = req.body?.originUrl || `${req.protocol}://${req.get('host')}`;
+    const session = await stripeService.createCheckoutSession({
+      productId: 'pass_premium_season',
+      originUrl: origin,
+      playerName: acc.profile.displayName || acc.username,
+      accountToken: token
+    });
+    res.json({ ok: true, seasonId: season.id, ...session });
+  } catch (err) {
+    const status = err.code === 'STRIPE_NOT_CONFIGURED' ? 503 : 400;
+    res.status(status).json({ ok: false, error: err.message, code: err.code || 'CHECKOUT_FAILED' });
+  }
+});
+
+// Verify a returning pass-checkout session server-side. On a paid
+// pass_premium_season session, records the premium entitlement for the
+// CURRENT season (idempotent — replay-safe via stripeService).
+const handlePassVerify = async (req, res) => {
+  const token = metaToken(req);
+  const acc = metaAccount(req, res);
+  if (!acc) return;
+  try {
+    const sessionId = req.query.session_id || req.body?.sessionId;
+    const result = await stripeService.verifySession(sessionId, token);
+    if (result.verified && result.productId === 'pass_premium_season') {
+      const grant = BattlePass.grantPremiumFromPurchase(token);
+      if (!grant.ok) {
+        return res.status(400).json({ ok: false, error: grant.error });
+      }
+      return res.json({
+        ok: true,
+        verified: true,
+        alreadyGranted: !!result.alreadyGranted,
+        premium: true,
+        seasonId: grant.seasonId,
+        pass: BattlePass.getPassState(token)
+      });
+    }
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    res.status(400).json({ ok: false, error: err.message });
+  }
+};
+app.get('/api/pass/verify', handlePassVerify);
+app.post('/api/pass/verify', handlePassVerify);
+
+// Weekly leaderboards — server-computed standings (shared schema in
+// server/game/systems/Leaderboards.js, also used by the rift system).
+function leaderboardLimit(req) {
+  const n = parseInt(req.query.limit, 10);
+  return Math.max(1, Math.min(25, Number.isFinite(n) ? n : 10));
+}
+
+app.get('/api/leaderboards', (req, res) => {
+  res.json({
+    ok: true,
+    weekId: SeasonService.weekIdFor(),
+    boards: Leaderboards.publicBoards(leaderboardLimit(req))
+  });
+});
+
+app.get('/api/leaderboards/:board', (req, res) => {
+  const result = Leaderboards.getBoard(req.params.board, {
+    weekId: req.query.weekId || null,
+    limit: leaderboardLimit(req)
+  });
+  if (!result.ok) {
+    return res.status(404).json(result);
+  }
+  res.json({ ok: true, ...result });
+});
+
+// ===========================================================================
+// PHASE 4 (workstream 2): COVENS — lifecycle, ranks, progression, race, chat.
+// All endpoints are server-authoritative; the client only renders state.
+// ===========================================================================
+const CovenService = require('./game/systems/CovenService');
+
+function covenAccount(req, res) {
+  const acc = authService.getAccountByToken(metaToken(req));
+  if (!acc) {
+    res.status(401).json({ ok: false, error: 'Session expired or not logged in.' });
+    return null;
+  }
+  return acc;
+}
+
+// Live coven websocket subscribers: covenId -> Set<ws>. Used for coven chat
+// delivery and coven_update pushes after mutations.
+const covenSubscribers = new Map(); // covenId -> Set<ws>
+const covenSocketCoven = new Map(); // ws -> covenId
+
+function broadcastToCoven(covenId, messageObj) {
+  const subs = covenSubscribers.get(covenId);
+  if (!subs || subs.size === 0) return;
+  const payload = JSON.stringify(messageObj);
+  for (const clientWs of subs) {
+    if (clientWs.readyState === WebSocket.OPEN) clientWs.send(payload);
+  }
+}
+
+function unsubscribeCovenSocket(ws) {
+  const covenId = covenSocketCoven.get(ws);
+  if (!covenId) return;
+  covenSocketCoven.delete(ws);
+  const subs = covenSubscribers.get(covenId);
+  if (subs) {
+    subs.delete(ws);
+    if (subs.size === 0) covenSubscribers.delete(covenId);
+  }
+}
+
+// Push the fresh public coven state to every online subscriber (roster,
+// ranks, XP). Called after every coven mutation below.
+function notifyCoven(covenId) {
+  const subs = covenSubscribers.get(covenId);
+  if (!subs || subs.size === 0) return;
+  const store = CovenService; // fresh public view per socket below
+  for (const clientWs of [...subs]) {
+    try {
+      const meta = socketMeta.get(clientWs);
+      const uname = meta && meta.accountUsername;
+      if (!uname) continue;
+      const state = store.getCovenState({ username: uname });
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(JSON.stringify({ type: 'coven_update', ...state }));
+      }
+    } catch (e) { /* never break on a push */ }
+  }
+}
+
+app.get('/api/coven/state', (req, res) => {
+  const acc = authService.getAccountByToken(metaToken(req));
+  // Race standings are public (glory is meant to be seen); roster detail
+  // needs a session.
+  const uname = acc ? acc.username : null;
+  res.json(CovenService.getCovenState({ username: uname }));
+});
+
+app.post('/api/coven/create', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.createCoven({
+    username: acc.username,
+    displayName: acc.profile.displayName || acc.username,
+    name: req.body?.name,
+    tagline: req.body?.tagline
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/join', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.joinByCode({
+    username: acc.username,
+    displayName: acc.profile.displayName || acc.username,
+    code: req.body?.code
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/leave', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const covenId = CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.leaveCoven({ username: acc.username });
+  if (!result.ok) return res.status(400).json(result);
+  if (covenId) notifyCoven(covenId);
+  res.json(result);
+});
+
+app.post('/api/coven/disband', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const covenId = CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.disbandCoven({ username: acc.username });
+  if (!result.ok) return res.status(400).json(result);
+  if (covenId) {
+    broadcastToCoven(covenId, { type: 'coven_disbanded', covenId, covenName: result.covenName });
+    for (const clientWs of [...(covenSubscribers.get(covenId) || [])]) unsubscribeCovenSocket(clientWs);
+  }
+  res.json(result);
+});
+
+app.post('/api/coven/promote', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.setRank({
+    actorUsername: acc.username,
+    targetUsername: req.body?.username,
+    rank: 'officer'
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/demote', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.setRank({
+    actorUsername: acc.username,
+    targetUsername: req.body?.username,
+    rank: 'member'
+  });
+  if (!result.ok) return res.status(400).json(result);
+  notifyCoven(result.coven.id);
+  res.json(result);
+});
+
+app.post('/api/coven/kick', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const target = (req.body?.username || '').toLowerCase().trim();
+  const covenId = CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.kickMember({ actorUsername: acc.username, targetUsername: target });
+  if (!result.ok) return res.status(400).json(result);
+  if (covenId) notifyCoven(covenId);
+  res.json(result);
+});
+
+app.post('/api/coven/invite/rotate', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.rotateInviteCode({ username: acc.username });
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.get('/api/coven/race', (req, res) => {
+  res.json(CovenService.getWeeklyRace());
+});
+
+app.get('/api/coven/chat', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const covenId = req.query.covenId || CovenService.getCovenIdForUser(acc.username);
+  const result = CovenService.getChat(covenId, req.query.after || 0, acc.username);
+  if (!result.ok) return res.status(400).json(result);
+  res.json(result);
+});
+
+app.post('/api/coven/chat', (req, res) => {
+  const acc = covenAccount(req, res);
+  if (!acc) return;
+  const result = CovenService.sendChat({
+    username: acc.username,
+    displayName: acc.profile.displayName || acc.username,
+    text: req.body?.text
+  });
+  if (!result.ok) return res.status(400).json(result);
+  broadcastToCoven(result.covenId, { type: 'coven_chat', covenId: result.covenId, message: result.message });
+  res.json(result);
+});
+
+// ============================================================================
 // 3. STATIC CLIENT & THREE.JS ADDONS HOSTING
 // ============================================================================
 app.use(express.static(path.join(__dirname, '..', 'client')));
@@ -275,6 +602,37 @@ function findOrCreateQuickplayRoom() {
   return { roomCode, room, isNew: true };
 }
 
+// PHASE 4 (workstream 1): Daily Delve matchmaking. One shared public room per
+// calendar day, seeded deterministically so every player runs the SAME
+// dungeon. Base room code 'DLDY' with overflow codes DLD2..DLD9 (8 humans per
+// room). Stale rooms from a previous day are retired on sight.
+function findOrCreateDailyRoom() {
+  const delve = SeasonService.getDailyDelve();
+  for (let n = 0; n < 9; n++) {
+    const code = n === 0 ? 'DLDY' : `DLD${n + 1}`;
+    const existing = rooms.get(code);
+    if (existing) {
+      if (existing.dailyDate !== delve.date) {
+        existing.state = 'completed';
+        rooms.delete(code);
+      } else if (existing.state !== 'completed') {
+        const humanCount = Object.values(existing.players).filter(p => !p.isBot).length;
+        if (humanCount < 8) return { roomCode: code, room: existing, isNew: false };
+        continue; // full — try the next overflow room
+      }
+    }
+    const room = new Room(code);
+    room.isDailyDelve = true;
+    room.dailySeed = delve.seed;
+    room.dailyDate = delve.date;
+    room.setBroadcastCallback((msg) => broadcastToRoom(code, msg));
+    rooms.set(code, room);
+    return { roomCode: code, room, isNew: true };
+  }
+  // Practically unreachable (9 full daily rooms) — fall back to quickplay.
+  return findOrCreateQuickplayRoom();
+}
+
 wss.on('connection', (ws) => {
   const socketId = `p_${Math.random().toString(36).substring(2, 9)}`;
 
@@ -288,6 +646,8 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    // PHASE 4 (workstream 2): drop coven live-channel subscription.
+    unsubscribeCovenSocket(ws);
     const meta = socketMeta.get(ws);
     if (meta && meta.roomCode) {
       const room = rooms.get(meta.roomCode);
@@ -381,6 +741,60 @@ function handleClientMessage(ws, socketId, data) {
       break;
     }
 
+    // PHASE 4 (workstream 1): Daily Delve matchmaking — joins today's shared
+    // seeded dungeon. Same flow as quickplay: joins the daily room, starts
+    // the dungeon on first entry, and reports the daily seed to the client.
+    case 'daily_delve_matchmaking': {
+      const { roomCode, room, isNew } = findOrCreateDailyRoom();
+      const player = room.addPlayer(socketId, data.playerName, data.chosenClass, false, data.profile, data.accountToken);
+      socketMeta.set(ws, { roomCode, playerId: socketId });
+
+      if (isNew || room.state === 'lobby') {
+        room.startDungeon();
+      }
+
+      ws.send(JSON.stringify({
+        type: 'room_joined',
+        roomCode,
+        player,
+        room: room.getSnapshot(),
+        dailyDelve: true,
+        dailyDate: room.dailyDate || null,
+        dailySeed: room.dailySeed != null ? room.dailySeed : null
+      }));
+
+      if (room.state === 'dungeon') {
+        ws.send(JSON.stringify({
+          type: 'dungeon_started',
+          roomCode,
+          snapshot: room.getSnapshot(),
+          dailyDelve: true,
+          dailySeed: room.dailySeed != null ? room.dailySeed : null
+        }));
+
+        if (room.proceduralConfig) {
+          ws.send(JSON.stringify({
+            type: 'procedural_floor_generated',
+            config: room.proceduralConfig,
+            proceduralConfig: room.proceduralConfig
+          }));
+        }
+      }
+
+      if (player.secretObjective) {
+        ws.send(JSON.stringify({
+          type: 'secret_objective_assigned',
+          objective: player.secretObjective
+        }));
+      }
+
+      room.broadcast({
+        type: 'player_joined',
+        player
+      });
+      break;
+    }
+
     case 'create_room': {
       const roomCode = generateRoomCode();
       const room = new Room(roomCode);
@@ -408,6 +822,19 @@ function handleClientMessage(ws, socketId, data) {
       if (!room) {
         ws.send(JSON.stringify({ type: 'error', message: `Chamber ${roomCode} not found. Use Quickplay Matchmaking to join an active match!` }));
         return;
+      }
+      // Phase 4 (workstream 4): rift rooms are tier-gated — joining a tier
+      // you have not unlocked is tier-skipping by another door. Denied.
+      if (room.riftTier > 0) {
+        const joinAcc = authService.getAccountByToken(data.accountToken);
+        const riftState = joinAcc ? Rift.ensureRift(joinAcc.profile) : null;
+        if (!riftState || riftState.unlockedTier < room.riftTier) {
+          ws.send(JSON.stringify({
+            type: 'rift_denied',
+            reason: `Rift Tier ${room.riftTier} is sealed for you. Clear Tier ${riftState ? riftState.unlockedTier : 0} first.`
+          }));
+          return;
+        }
       }
       const player = room.addPlayer(socketId, data.playerName, data.chosenClass, false, data.profile, data.accountToken);
       socketMeta.set(ws, { roomCode, playerId: socketId });
@@ -612,6 +1039,170 @@ function handleClientMessage(ws, socketId, data) {
       if (room && room.state === 'dungeon') {
         room.systems?.oaths?.handleSwear(room, meta.playerId, data.shrineId, data.oathId);
       }
+      break;
+    }
+
+    // Phase 4 (workstream 4): Endless Rift — account rift state (keystones,
+    // unlocked tier). Read from the server-side account record only.
+    case 'rift_status': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'rift_status', ok: false, reason: 'Link your account to commune with the Rift.' }));
+        return;
+      }
+      ws.send(JSON.stringify({ type: 'rift_status', ...Rift.publicStatus(acc.profile) }));
+      break;
+    }
+
+    // Phase 4 (workstream 4): deterministic per-tier affix/scaling preview.
+    // Computed server-side from the tier alone — never trusted from clients.
+    case 'rift_tier_preview': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'rift_tier_preview', ok: false, reason: 'Link your account to commune with the Rift.' }));
+        return;
+      }
+      const tier = Math.max(1, Math.min(Rift.MAX_TIER, Math.floor(Number(data.tier) || 1)));
+      const r = Rift.ensureRift(acc.profile);
+      const allowed = r.unlockedTier >= 1 && tier <= r.unlockedTier;
+      ws.send(JSON.stringify({
+        type: 'rift_tier_preview',
+        ok: true,
+        tier,
+        affixes: Rift.publicAffixes(tier),
+        scaling: Rift.scalingFor(tier),
+        allowed,
+        reason: !allowed
+          ? (r.unlockedTier < 1
+            ? 'The Rift is sealed. Defeat Malakor to earn your first keystone.'
+            : `Clear Tier ${r.unlockedTier} to unlock Tier ${r.unlockedTier + 1}.`)
+          : null
+      }));
+      break;
+    }
+
+    // Phase 4 (workstream 4): enter the Endless Rift. Full server-side
+    // validation: account resolved from token, tier gate (no skipping),
+    // keystone consumed OR Rift Pact sworn. Creates a dedicated rift room.
+    case 'rift_start': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'rift_denied', reason: 'Link your account to enter the Rift.' }));
+        return;
+      }
+      const tier = Math.max(1, Math.min(Rift.MAX_TIER, Math.floor(Number(data.tier) || 1)));
+      const payment = data.payment === 'pact' ? 'pact' : 'keystone';
+      const v = Rift.validateEntry(acc.profile, tier, payment);
+      if (!v.ok) {
+        ws.send(JSON.stringify({ type: 'rift_denied', reason: v.reason }));
+        return;
+      }
+      if (!Rift.consumeEntry(acc.profile, payment)) {
+        ws.send(JSON.stringify({ type: 'rift_denied', reason: 'The gate rejects your offering.' }));
+        return;
+      }
+      authService.saveAccounts(); // atomic — keystone consumed before the room exists
+
+      const roomCode = generateRoomCode();
+      const room = new Room(roomCode);
+      room.setBroadcastCallback((msg) => {
+        broadcastToRoom(roomCode, msg);
+      });
+      // Rift state is set BEFORE startDungeon so spawns scale correctly.
+      room.riftTier = v.tier;
+      room.riftAffixes = Rift.affixesForTier(v.tier);
+      room.riftPact = (payment === 'pact');
+
+      const player = room.addPlayer(socketId, data.playerName, data.chosenClass, false, data.profile, data.accountToken);
+      rooms.set(roomCode, room);
+      socketMeta.set(ws, { roomCode, playerId: socketId });
+
+      if (room.riftPact) Rift.applyPactToPlayer(room, player);
+      room.startDungeon();
+
+      ws.send(JSON.stringify({
+        type: 'room_joined',
+        roomCode,
+        player,
+        room: room.getSnapshot()
+      }));
+      ws.send(JSON.stringify({
+        type: 'dungeon_started',
+        roomCode,
+        snapshot: room.getSnapshot()
+      }));
+      if (room.proceduralConfig) {
+        ws.send(JSON.stringify({
+          type: 'procedural_floor_generated',
+          config: room.proceduralConfig,
+          proceduralConfig: room.proceduralConfig
+        }));
+      }
+      ws.send(JSON.stringify({
+        type: 'rift_started',
+        roomCode,
+        tier: v.tier,
+        affixes: Rift.publicAffixes(v.tier),
+        scaling: Rift.scalingFor(v.tier),
+        pact: room.riftPact,
+        keystones: Rift.ensureRift(acc.profile).keystones
+      }));
+      room.broadcast({
+        type: 'narrator_announcement',
+        text: `🌀 ${player.name} descends into RIFT TIER ${v.tier}! Affixes: ${Rift.publicAffixes(v.tier).map(a => `${a.icon} ${a.name}`).join(' · ')}`,
+        tone: 'danger'
+      });
+      break;
+    }
+
+    // PHASE 4 (workstream 2): coven live channel. Subscribers receive
+    // 'coven_chat' whispers and 'coven_update' roster/XP pushes for their
+    // coven. Auth resolved from the account token, never trusted from the
+    // client. Chat text is validated and stored by CovenService (last 100
+    // per coven, rate-limited, length-capped).
+    case 'coven_subscribe': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'coven_subscribe', ok: false, reason: 'Link your account to hear your coven.' }));
+        return;
+      }
+      const covenId = CovenService.getCovenIdForUser(acc.username);
+      if (!covenId) {
+        ws.send(JSON.stringify({ type: 'coven_subscribe', ok: false, reason: 'no_coven' }));
+        return;
+      }
+      unsubscribeCovenSocket(ws);
+      const meta = socketMeta.get(ws) || {};
+      meta.accountUsername = acc.username;
+      socketMeta.set(ws, meta);
+      if (!covenSubscribers.has(covenId)) covenSubscribers.set(covenId, new Set());
+      covenSubscribers.get(covenId).add(ws);
+      covenSocketCoven.set(ws, covenId);
+      ws.send(JSON.stringify({
+        type: 'coven_subscribe',
+        ok: true,
+        covenId,
+        state: CovenService.getCovenState({ username: acc.username })
+      }));
+      break;
+    }
+
+    case 'coven_chat': {
+      const acc = authService.getAccountByToken(data.accountToken);
+      if (!acc) {
+        ws.send(JSON.stringify({ type: 'coven_chat', ok: false, reason: 'Link your account to whisper.' }));
+        return;
+      }
+      const result = CovenService.sendChat({
+        username: acc.username,
+        displayName: acc.profile.displayName || acc.username,
+        text: data.text
+      });
+      if (!result.ok) {
+        ws.send(JSON.stringify({ type: 'coven_chat', ok: false, reason: result.error }));
+        return;
+      }
+      broadcastToCoven(result.covenId, { type: 'coven_chat', covenId: result.covenId, message: result.message });
       break;
     }
   }

@@ -74,6 +74,12 @@ export class NetworkClient {
     this.send({ type: 'quickplay_matchmaking', playerName, chosenClass, profile, accountToken });
   }
 
+  // Phase 4: Daily Delve — join today's shared seeded dungeon (same seed for
+  // every player, server-generated per calendar day).
+  dailyDelveMatchmaking(playerName, chosenClass, profile = null, accountToken = null) {
+    this.send({ type: 'daily_delve_matchmaking', playerName, chosenClass, profile, accountToken });
+  }
+
   createRoom(playerName, chosenClass, profile = null, accountToken = null) {
     this.send({ type: 'create_room', playerName, chosenClass, profile, accountToken });
   }

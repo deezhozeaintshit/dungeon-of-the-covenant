@@ -10,6 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800;900&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css?v=5.0">
+  <!-- Phase 4 (workstream 4): Endless Rift UI -->
+  <link rel="stylesheet" href="css/rift.css?v=1.0">
+  <!-- Phase 4 (workstream 3): clip button + preview modal styles -->
+  <link rel="stylesheet" href="css/clip.css?v=4.0">
   <script type="importmap">
     {
       "imports": {
@@ -131,6 +135,14 @@
           </button>
           <button id="btn-covenant-vault" class="btn btn-secondary" aria-label="Open the Covenant Vault: account ranks and unlockables">
             📜 COVENANT VAULT — RANKS &amp; UNLOCKS
+          </button>
+          <!-- Phase 4 (workstream 4): Endless Rift gate -->
+          <button id="btn-rift-gate" class="btn btn-secondary" aria-label="Open the Endless Rift gate: post-campaign scaling dungeons">
+            🌀 RIFT GATE — ENDLESS RIFT
+          </button>
+          <!-- Phase 4 (workstream 2): Covens — fellowship, ranks, rite war, whispers -->
+          <button id="btn-coven" class="btn btn-secondary" aria-label="Open the coven panel: your fellowship, its ranks, the weekly rite war, and coven whispers">
+            🕯️ COVEN — FELLOWSHIP &amp; RITE WAR
           </button>
           <a href="/promo.html" target="_blank" rel="noopener" class="btn btn-secondary promo-link">
             🎬 WATCH OFFICIAL AAA PROMO TRAILER
@@ -262,6 +274,11 @@
         <button id="btn-pause-open" class="secret-tab-btn" title="Pause Menu">
           <span class="secret-icon">⏸️</span>
           <span class="secret-label">MENU</span>
+        </button>
+        <!-- Phase 4 (workstream 3): one-tap 30s gameplay clip (C). Local-only recording. -->
+        <button id="btn-clip" class="secret-tab-btn" title="Save the last 30 seconds of gameplay (C)" aria-label="Save the last 30 seconds of gameplay as a clip">
+          <span class="secret-icon">🎬</span>
+          <span class="secret-label">CLIP [C]</span>
         </button>
 
         <div id="gamepad-hud-badge" title="Gamepad / Controller Support Ready (Connect any Xbox/PS/USB Controller)">
@@ -413,41 +430,43 @@
     </div>
 
     <!-- Mobile ability arc -->
+    <!-- [Phase4-WS5] aria-labels for WCAG; attack-cd overlay mirrors the other skill overlays -->
     <div class="abilities-zone">
-      <button id="btn-open-ping" class="action-btn ping-trigger-btn" title="Party Ping">📍</button>
+      <button id="btn-open-ping" class="action-btn ping-trigger-btn" title="Party Ping" aria-label="Party ping">📍</button>
 
-      <button id="btn-jump" class="action-btn skill-btn jump-btn" data-skill="jump" title="Jump Over Ledges & Pull Nearby Loot (Spacebar / Gamepad A)">
+      <button id="btn-jump" class="action-btn skill-btn jump-btn" data-skill="jump" title="Jump Over Ledges & Pull Nearby Loot (Spacebar / Gamepad A)" aria-label="Jump over ledges and pull nearby loot">
         <div class="skill-icon">🦘</div>
         <div class="skill-cooldown-overlay" id="jump-cd"></div>
         <span class="skill-label">JUMP</span>
       </button>
 
-      <button id="btn-dash" class="action-btn skill-btn dash-btn" data-skill="dash" title="Tactical Dodge Dash (Shift / Gamepad B - Invulnerable i-frames)">
+      <button id="btn-dash" class="action-btn skill-btn dash-btn" data-skill="dash" title="Tactical Dodge Dash (Shift / Gamepad B - Invulnerable i-frames)" aria-label="Tactical dodge dash">
         <div class="skill-icon">💨</div>
         <div class="skill-cooldown-overlay" id="dash-cd"></div>
         <span class="skill-label">DASH</span>
       </button>
 
-      <button id="btn-skill-1" class="action-btn skill-btn" data-skill="1" title="Ability 1">
+      <button id="btn-skill-1" class="action-btn skill-btn" data-skill="1" title="Ability 1" aria-label="Ability 1">
         <div class="skill-icon" id="skill-1-icon">💥</div>
         <div class="skill-cooldown-overlay" id="skill-1-cd"></div>
         <span class="skill-label" id="skill-1-label">S1</span>
       </button>
 
-      <button id="btn-skill-2" class="action-btn skill-btn" data-skill="2" title="Ability 2">
+      <button id="btn-skill-2" class="action-btn skill-btn" data-skill="2" title="Ability 2" aria-label="Ability 2">
         <div class="skill-icon" id="skill-2-icon">🛡️</div>
         <div class="skill-cooldown-overlay" id="skill-2-cd"></div>
         <span class="skill-label" id="skill-2-label">S2</span>
       </button>
 
-      <button id="btn-skill-3" class="action-btn skill-btn ultimate" data-skill="3" title="Ultimate Ability">
+      <button id="btn-skill-3" class="action-btn skill-btn ultimate" data-skill="3" title="Ultimate Ability" aria-label="Ultimate ability">
         <div class="skill-icon" id="skill-3-icon">⚡</div>
         <div class="skill-cooldown-overlay" id="skill-3-cd"></div>
         <span class="skill-label" id="skill-3-label">S3</span>
       </button>
 
-      <button id="btn-attack" class="action-btn attack-btn" data-skill="attack" title="Basic Attack">
+      <button id="btn-attack" class="action-btn attack-btn" data-skill="attack" title="Basic Attack" aria-label="Basic attack">
         <div class="attack-icon">⚔️</div>
+        <div class="skill-cooldown-overlay" id="attack-cd"></div>
       </button>
     </div>
   </div>

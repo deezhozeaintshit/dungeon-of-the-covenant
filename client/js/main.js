@@ -5,6 +5,8 @@ import { DungeonBuilder } from './dungeon.js?v=9.0';
 import { EntityManager } from './entities.js?v=9.0';
 import { CombatVisuals } from './combat.js?v=9.0';
 import { GameControls } from './controls.js?v=9.0';
+// [Phase4-WS5] Touch controls manager: auto-detect + Auto/On/Off preference + optimistic cooldown sweeps.
+import { TouchControlsManager } from './ui/touchControls.js?v=9.0';
 import { NarratorSystem } from './narrator.js?v=9.0';
 import { LootSystem } from './loot.js?v=9.0';
 import { NetworkClient } from './network.js?v=9.0';
@@ -32,11 +34,24 @@ import { MinimapEnhanced } from './minimapenhanced.js';
 // quality-of-life settings (reduced motion honoring prefers-reduced-motion).
 import { EnhancedCombatVFX } from './enhancedcombatvfx.js?v=9.1';
 import { PerformanceMonitor } from './performancemonitor.js?v=9.1';
+// Phase 4 (workstream 6: PERFORMANCE PASS): distance-LOD tiers for enemies.
+import { LODManager } from './perf/lodSystem.js?v=9.2';
 import { QualityOfLife } from './qualityoflife.js?v=9.1';
+// Phase 4 (workstream 3): one-tap 30s gameplay clip capture (ring buffer)
+// for the TikTok marketing flywheel.
+import { ClipRecorder } from './clipRecorder.js?v=4.0';
+import { initClipButton } from './clipUI.js?v=4.0';
 // (Mixamo clip binding moved to entities.js _bindHeroClipSet.)
 import { initLevelUpModal, initSkillTreePanel, updateXPBar, renderRespawnCountdown, bindRespawnButton } from './ui/levelup.js';
 import { initOathModal } from './ui/oathModal.js';
 import { initMetaProgression } from './ui/metaProgression.js';
+// Phase 4 (workstream 1): seasons + battle pass + daily delve + leaderboards.
+import { initSeasonPass } from './ui/seasonPass.js';
+// Phase 4 (workstream 4): Endless Rift mode — rift gate portal, in-rift HUD
+// (tier + affix icons), and tier-clear banner. Display-only; the server is
+// authoritative for affixes, scaling, unlocks, and keystones.
+import { initRiftUI } from './ui/riftUI.js';
+import { initCovenUI } from './ui/covenUI.js';
 // Phase 3: server-authoritative loot inventory + equipment panel (workstream 2).
 import { initInventoryPanel } from './ui/inventory.js';
 
@@ -171,6 +186,11 @@ class GameApp {
     this.narrator = new NarratorSystem(this.audio);
     this.initNetwork();
 
+    // [Phase4-WS5] Init touch controls layer BEFORE GameControls so the body
+    // class gating (touch-active) applies before any input UI binds.
+    this.touchControls = new TouchControlsManager();
+    this.touchControls.init();
+
     this.controls = new GameControls({
       onInput: (vec, rot) => {
         if (this.gameState === 'dungeon' && this.network) {
@@ -181,6 +201,8 @@ class GameApp {
         if (this.gameState === 'dungeon' && this.network) {
           this.playActionSFX(action);
           this.network.sendInput({ action, targetPos, rotation, targetId });
+          // [Phase4-WS5] Optimistic touch cooldown sweep (fills tap-to-snapshot gap).
+          this.touchControls?.markActionFired(action);
 
           // Only trigger weapon swing animation & slash arc on combat attacks/skills (not jump or loot)
           if (action !== 'jump' && action !== 'loot' && action !== 'dash' && this.entities && this.combat) {
@@ -279,6 +301,13 @@ class GameApp {
       this.feelFX = new EnhancedCombatVFX(this.renderer.scene);
       this.perfMonitor = new PerformanceMonitor();
       this.perfMonitor.start();
+      // Phase 4 (workstream 6: PERFORMANCE PASS): distance-LOD tiers for
+      // enemies (+ far-tier impostor for the Cinder Thrall GLB). Static prop
+      // InstancedMesh batching is on by default inside PropPlacer.
+      this.lodManager = new LODManager();
+      if (this.entities && typeof this.entities.setLodManager === 'function') {
+        this.entities.setLodManager(this.lodManager);
+      }
       this.qol = new QualityOfLife(this);
       this.qol.loadSettings();
       // prefers-reduced-motion: OS-level signal disables shake + hit-stop
@@ -359,6 +388,63 @@ class GameApp {
       }
     }
     this.metaUI.refresh();
+
+    // Phase 4 seasons + battle pass (workstream 1): daily-delve banner,
+    // season pass panel, weekly leaderboards. Server-authoritative; every
+    // pass reward is a cosmetic — never pay-to-win.
+    this.seasonUI = initSeasonPass({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      getAuthToken: () => this.authToken,
+      getPlayerName: () => (document.getElementById('player-name-input') || {}).value || 'Hero',
+      getChosenClass: () => this.selectedClass || 'juggernaut',
+      mergeCosmeticDefs: (defs) => {
+        const ent = this.app && this.app.entities;
+        if (!ent) return;
+        if (!(ent.cosmeticDefs instanceof Map)) ent.cosmeticDefs = new Map();
+        for (const d of defs) ent.cosmeticDefs.set(d.id, d);
+      },
+      onClaim: () => { if (this.audio && this.audio.playSFX) this.audio.playSFX('powerup'); }
+    });
+    this.seasonUI.refresh();
+
+    // Phase 4 Endless Rift (workstream 4): rift gate portal + in-rift HUD.
+    // Server-authoritative: the client renders state and sends { tier,
+    // payment } only — affixes, scaling, and unlocks come from the server.
+    this.riftUI = initRiftUI({
+      network: this.network,
+      getAuthToken: () => this.authToken,
+      getPlayerName: () => (document.getElementById('player-name-input') || {}).value || 'Hero',
+      getChosenClass: () => this.selectedClass || 'juggernaut'
+    });
+    if (this.riftUI && this.riftUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.riftUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
+    }
+    const riftGateBtn = document.getElementById('btn-rift-gate');
+    if (riftGateBtn && this.riftUI) {
+      riftGateBtn.addEventListener('click', () => this.riftUI.open());
+    }
+
+    // Phase 4 covens (workstream 2): fellowship lifecycle, ranks, shared
+    // progression, weekly rite war, and coven whispers. Server-authoritative;
+    // the client only renders state. Live whispers ride the ws subscriber map.
+    this.covenUI = initCovenUI({
+      network: this.network,
+      hud: this.ui && this.ui.hud,
+      getAuthToken: () => this.authToken
+    });
+    if (this.covenUI && this.covenUI.handlers && this.network) {
+      for (const [type, cb] of Object.entries(this.covenUI.handlers)) {
+        this.network.on(type, (msg) => cb(msg));
+      }
+    }
+    const covenBtn = document.getElementById('btn-coven');
+    if (covenBtn && this.covenUI) {
+      covenBtn.addEventListener('click', () => this.covenUI.open());
+    }
+    this.covenUI.refresh();
 
     // Phase 3: server-authoritative inventory + equipment (workstream 2).
     // The panel is display-only; equip/unequip send id/slot to the server,
@@ -639,6 +725,11 @@ class GameApp {
           this.narrator.say(`Welcome back, ${data.profile.displayName || username}! Cloud stats & gear restored.`, 'info');
           // Phase 3: refresh covenant rank / vault state for the new session.
           if (this.metaUI) this.metaUI.refresh();
+          // Phase 4: refresh season pass / banner state for the new session.
+          if (this.seasonUI) this.seasonUI.refresh();
+          // Phase 4 (workstream 2): refresh coven state and (re)subscribe to
+          // the live coven channel for the new session.
+          if (this.covenUI) { this.covenUI.refresh(); this.covenUI.onConnect(); }
         } else {
           if (badge) badge.innerText = `⚠️ ${data?.error || 'Auth failed'}`;
         }
@@ -1108,6 +1199,8 @@ class GameApp {
           this.renderer.triggerHitStop(130);
         }
         this.feelFX.pulseDamageVignette(0.35);
+        // Phase 4 (workstream 3): epic moment — suggest saving the last 30s.
+        if (this.clipUI) this.clipUI.suggestClip('boss');
       };
     }
     // New loot on the floor: rarity-colored light pillar.
@@ -1121,7 +1214,32 @@ class GameApp {
           if (!Number.isNaN(parsed)) color = parsed;
         } else if (l.type === 'treasure_chest') color = 0xd4af37;
         this.feelFX.lootBeam(l.x, l.z, color, l.type === 'treasure_chest' ? 1.4 : 1.0);
+        // Phase 4 (workstream 3): legendary+ drop — suggest saving a clip.
+        const rarity = String(l.itemData?.rarity || l.itemData?.rarityName || '').toLowerCase();
+        if ((rarity === 'legendary' || rarity === 'mythic') && this.clipUI) {
+          this.clipUI.suggestClip(rarity);
+        }
       };
+    }
+    // Phase 4 (workstream 3): one-tap 30s gameplay clips. The recorder keeps
+    // a rolling 30s ring buffer (canvas.captureStream + MediaRecorder, chunks
+    // timestamped, older than the window evicted). Capture resolution/fps
+    // follows the Phase 3 PerformanceMonitor tier; buffering pauses when the
+    // tab is hidden. Local-only until the player downloads or shares.
+    // The canvas is attached here, but buffering starts on dungeon entry
+    // (enterDungeon) so the 30s window always holds gameplay, not menu footage.
+    try {
+      this.clipRecorder = new ClipRecorder({ perfMonitor: this.perfMonitor });
+      if (this.renderer && this.renderer.renderer) {
+        this.clipRecorder.attach(this.renderer.renderer.domElement);
+      }
+      this.clipUI = initClipButton({
+        recorder: this.clipRecorder,
+        isInGame: () => this.gameState === 'dungeon',
+        toast: (text, kind) => { if (this.ui && this.ui.hud) this.ui.hud.toast(text, kind); },
+      });
+    } catch (err) {
+      console.warn('[Phase4] Clip capture unavailable:', err);
     }
   }
 
@@ -1138,6 +1256,9 @@ class GameApp {
           this.ui.screens.loading.hide();
           document.getElementById('lobby-screen')?.classList.remove('hidden');
         }
+        // Phase 4 (workstream 2): (re)subscribe to the coven live channel —
+        // whispers and rite updates arrive over ws once the account links.
+        if (this.covenUI && this.covenUI.onConnect) this.covenUI.onConnect();
       },
       on_disconnect: () => {
         const badge = document.getElementById('connection-status-badge');
@@ -1530,6 +1651,10 @@ class GameApp {
     document.getElementById('game-hud').classList.remove('hidden');
     this.controls.setSkillInfo(CLASSES[this.selectedClass].abilities);
     this.audio.playSFX('powerup');
+    // Phase 4 (workstream 3): start the rolling 30s clip buffer now that
+    // real gameplay footage is rendering. start() is a safe no-op when the
+    // recorder is already buffering or unsupported in this browser.
+    if (this.clipRecorder) this.clipRecorder.start();
   }
 
   handleSnapshot(snap) {
@@ -1711,7 +1836,10 @@ class GameApp {
 
         // Update Live Ability Cooldown Sweep Overlays
         const cds = p.cooldowns || {};
-        const maxCds = { skill1: 3.5, skill2: 6.0, skill3: 10.0, dash: 3.0 };
+        // [Phase4-WS5] Feed server cooldowns to the touch manager so optimistic
+        // sweeps learn real per-class maxima (and add attack/jump overlays).
+        this.touchControls?.observeServerCooldowns(cds);
+        const maxCds = { skill1: 3.5, skill2: 6.0, skill3: 10.0, dash: 3.0, jump: 0.65, attack: 0.6 };
         const updateCdEl = (elId, rem, max) => {
           const el = document.getElementById(elId);
           if (!el) return;
@@ -1723,6 +1851,8 @@ class GameApp {
         updateCdEl('skill-2-cd', cds.skill2 || 0, maxCds.skill2);
         updateCdEl('skill-3-cd', cds.skill3 || 0, maxCds.skill3);
         updateCdEl('dash-cd', cds.dash || 0, maxCds.dash);
+        updateCdEl('jump-cd', cds.jump || 0, maxCds.jump);
+        updateCdEl('attack-cd', cds.attack || 0, maxCds.attack);
       }
     });
   }
@@ -1793,6 +1923,8 @@ class GameApp {
       }
     }
     if (this.metaUI) this.metaUI.refresh();
+    // Phase 4: season XP changed — refresh the pass tier/progress UI.
+    if (this.seasonUI) this.seasonUI.refresh();
   }
 
   renderLoop(time) {
@@ -1842,11 +1974,17 @@ class GameApp {
 
     // Update Controls
     this.controls.update(dt);
+    // [Phase4-WS5] Advance optimistic touch cooldown sweeps.
+    this.touchControls?.tick(performance.now());
 
     // Update Visuals & Animations
     this.combat.update(dt);
     this.loot.update(dt);
     this.entities.update(dt);
+    // Phase 4 (workstream 6: PERFORMANCE PASS): enemy LOD tiers (throttled
+    // internally) + distance LOD for instanced prop decor parts.
+    if (this.lodManager) this.lodManager.update(this.renderer.camera);
+    if (this.dungeon && this.dungeon.propPlacer) this.dungeon.propPlacer.updateLOD(this.renderer.camera);
     // Phase 3 game feel: pooled particles, beams, rings, damage vignette.
     if (this.feelFX) this.feelFX.update(dt);
     // Phase 2: enemy telegraph/progress visuals + oath shrine proximity tick.
@@ -1861,6 +1999,10 @@ class GameApp {
     let localMesh = this.entities.playerMeshes.get(this.localPlayerId);
     const followPos = localMesh ? localMesh.position : null;
     this.renderer.update(rawDt, followPos);
+
+    // Phase 4 (workstream 3): feed the clip recorder one frame copy (cheap
+    // downscaled blit, frame-skipped internally to the capture profile fps).
+    if (this.clipRecorder) this.clipRecorder.captureTick();
 
     // Phase 3: feed the performance monitor (drives bloom auto-degrade).
     if (this.perfMonitor) {

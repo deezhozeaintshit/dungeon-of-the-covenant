@@ -10,6 +10,8 @@ import { createAnimator } from './animation/AnimationStates.js';
 import { loadClipSet, HERO_STATE_PREFIX_OVERRIDES } from './animation/MixamoRig.js';
 // Phase 3 (workstream 6): cosmetic shop renderers (skins, weapon glows, emotes).
 import { syncPlayerCosmetics, playEmote } from './cosmetics.js?v=9.0';
+// [perf-workstream] batched mob threat rings (Phase 4).
+import { RingBatcher, isRingBatchingEnabled } from './perf/ringBatcher.js';
 
 export class EntityManager {
   constructor(scene) {
@@ -29,11 +31,26 @@ export class EntityManager {
     this.onBossDied = null;
     this.targetReticle = this.createTargetReticle();
     this.scene.add(this.targetReticle);
+    // [perf-workstream] one InstancedMesh for all mob threat rings (Phase 4).
+    // Null when ring batching is disabled (perf-benchmark baseline mode).
+    this.ringBatcher = isRingBatchingEnabled() ? new RingBatcher(scene) : null;
     // Shared PMREM environment for character PBR materials (set via setRenderer).
     this._charEnvMap = null;
     // Cinder thrall death crumbles: meshes removed from mobMeshes but kept
     // in-scene while the crumble/sink + fade plays (~1.5s).
     this._cinderDeaths = new Map();
+    // Phase 4 (workstream 6: PERFORMANCE PASS): distance-LOD manager,
+    // injected by the game app via setLodManager().
+    this.lodManager = null;
+  }
+
+  // Phase 4 perf: inject the LODManager (owned by main.js). Mobs created
+  // afterwards register automatically; pre-existing mobs register now.
+  setLodManager(lm) {
+    this.lodManager = lm || null;
+    if (this.lodManager) {
+      for (const group of this.mobMeshes.values()) this.lodManager.registerMob(group);
+    }
   }
 
   // characters track: give EntityManager the WebGLRenderer so character PBR
@@ -160,6 +177,10 @@ export class EntityManager {
       cinderRoot.add(clone);
       c.model = clone;
       c.loaded = true;
+      // Phase 4 (workstream 6: PERFORMANCE PASS): far-tier impostor for the
+      // 37k-vert GLB — the LODManager swaps model <-> impostor by distance
+      // with hysteresis.
+      if (this.lodManager) this.lodManager.registerCinder(group);
       this._initCinderWisps(group);
       upgradeCharacterMaterials(clone, this._charEnvMap);
       enableCharacterLightLayer(clone);
@@ -267,6 +288,10 @@ export class EntityManager {
     if (c.deathT >= 1.5) {
       this._cinderDeaths.delete(group.userData.deathId);
       this.scene.remove(group);
+      // Phase 4 perf: drop LOD state with the mesh.
+      if (this.lodManager) this.lodManager.unregister(group);
+      // [perf-workstream] drop the batched threat ring with the mesh.
+      if (this.ringBatcher) this.ringBatcher.unregister(group);
       group.traverse((node) => {
         if (node.geometry) node.geometry.dispose();
         if (node.material) {
@@ -322,6 +347,8 @@ export class EntityManager {
       if (!activeIds.has(id)) {
         this.scene.remove(mesh);
         this.playerMeshes.delete(id);
+        // [perf-workstream] drop player LOD state with the mesh (Phase 4).
+        if (this.lodManager) this.lodManager.unregister(mesh);
       }
     }
 
@@ -333,6 +360,10 @@ export class EntityManager {
         group = this.createArticulatedPlayerMesh(p, isLocal);
         this.playerMeshes.set(p.id, group);
         this.scene.add(group);
+        // [perf-workstream] distance LOD for players (Phase 4): remote heroes
+        // far from the camera shed fine/decor meshes; the local hero stays in
+        // the near tier because the follow camera never leaves it.
+        if (this.lodManager) this.lodManager.registerMob(group);
         // Phase 2: Mixamo clip set for every hero (local + remote).
         this._bindHeroClipSet(group, p.classKey || 'juggernaut');
       } else if (group.userData._clipSetBound === false) {
@@ -909,6 +940,11 @@ export class EntityManager {
     };
 
     this.createOverheadBar(group, p.name, false, isLocal);
+    // [perf-workstream] expose the articulated body for distance LOD (Phase 4):
+    // remote players far from the camera shed fine/decor meshes like mobs do.
+    // Group-level attachments (hero ring, blob shadow, bar sprite, revive /
+    // overdrive / ice-cube FX) live outside rootBone and are never touched.
+    group.userData.bodyRoot = rootBone;
     // characters track: PBR pass, rim-light layer, blob shadow, combat anim
     this.finalizeCharacterGroup(group, classKey === 'juggernaut' ? 1.35 : 1.05, 0.55);
     return group;
@@ -1220,6 +1256,10 @@ export class EntityManager {
         }
         this.scene.remove(mesh);
         this.mobMeshes.delete(id);
+        // Phase 4 perf: drop LOD state with the mesh.
+        if (this.lodManager) this.lodManager.unregister(mesh);
+        // [perf-workstream] drop the batched threat ring with the mesh.
+        if (this.ringBatcher) this.ringBatcher.unregister(mesh);
       }
     }
 
@@ -1273,18 +1313,25 @@ export class EntityManager {
       elite_executioner: 0xff1133,
       elite_lich: 0x00ddff
     };
-    const threatRing = new THREE.Mesh(
-      new THREE.RingGeometry(0.8, 1.04, 28),
-      new THREE.MeshBasicMaterial({
-        color: ringColors[m.type] || 0xff2222,
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.82
-      })
-    );
-    threatRing.rotation.x = -Math.PI / 2;
-    threatRing.position.y = 0.05;
-    group.add(threatRing);
+    // [perf-workstream] threat ring: batched into one InstancedMesh when ring
+    // batching is on, otherwise the original per-mob mesh (baseline mode).
+    // Color stays per-type either way.
+    if (this.ringBatcher) {
+      this.ringBatcher.register(group, ringColors[m.type] || 0xff2222);
+    } else {
+      const threatRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.8, 1.04, 28),
+        new THREE.MeshBasicMaterial({
+          color: ringColors[m.type] || 0xff2222,
+          side: THREE.DoubleSide,
+          transparent: true,
+          opacity: 0.82
+        })
+      );
+      threatRing.rotation.x = -Math.PI / 2;
+      threatRing.position.y = 0.05;
+      group.add(threatRing);
+    }
 
     const bodyRoot = new THREE.Group();
     group.add(bodyRoot);
@@ -1550,6 +1597,9 @@ export class EntityManager {
     this.createOverheadBar(group, m.name, true, false);
     // characters track: PBR pass, rim-light layer, blob shadow, combat anim
     this.finalizeCharacterGroup(group, 1.0, 0.55);
+    // Phase 4 (workstream 6: PERFORMANCE PASS): distance-LOD tiers operate
+    // on the bodyRoot subtree (rings, bars, shadows, auras untouched).
+    if (this.lodManager) this.lodManager.registerMob(group);
     return group;
   }
 
@@ -1792,6 +1842,8 @@ export class EntityManager {
 
   // --- PROCEDURAL ANIMATIONS (Walk Cycle, Jump Vault, Angel Wings, Spirit Falcon, Class Orbs & Monster Motion) ---
   update(dt) {
+    // [perf-workstream] refresh batched threat-ring instances (Phase 4).
+    if (this.ringBatcher) this.ringBatcher.update();
     // 1. Target reticle pulse
     if (this.targetReticle.visible) {
       this.targetReticle.userData.pulse = (this.targetReticle.userData.pulse || 0) + dt * 4;

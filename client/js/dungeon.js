@@ -5,6 +5,8 @@ import { GLTFLoader } from '/vendor/addons/loaders/GLTFLoader.js';
 import { assignZoneBiomes, dominantTemplate, hashSeed, mulberry32, KEEP_OUTS, resolveBiomeTemplate } from './biomes.js';
 import { PropPlacer } from './propPlacer.js';
 import { Atmosphere } from './atmosphere.js';
+// [perf-workstream] static architecture batching (Phase 4)
+import { batchStaticMeshes, isBatchingEnabled } from './perf/staticBatcher.js';
 
 export class DungeonBuilder {
   constructor(scene) {
@@ -119,7 +121,11 @@ export class DungeonBuilder {
       lava: lavaMat,
       iron: ironMat,
       bloodTrim: bloodTrimMat,
-      arcaneTrim: arcaneTrimMat
+      arcaneTrim: arcaneTrimMat,
+      // [perf-workstream] shared by every archway flame so the static batcher
+      // merges all 14 flame meshes into one draw call (was one material — and
+      // one bucket — per archway).
+      archFlame: new THREE.MeshStandardMaterial({ color: 0xff8800, emissive: 0xffaa22, emissiveIntensity: 2.8 })
     };
   }
 
@@ -318,6 +324,12 @@ export class DungeonBuilder {
     this.placeTorches(g);
 
     this.scene.add(g);
+
+    // [perf-workstream] Merge the citadel's static architecture per material.
+    // Everything under g is built once and never animated/moved/hidden, so
+    // ~250 individual meshes collapse into ~15 draw calls. Materials are
+    // shared by reference, so per-biome retints keep working.
+    if (isBatchingEnabled()) batchStaticMeshes(g);
   }
 
   addFloor(parent, centerX, centerZ, width, depth) {
@@ -370,7 +382,7 @@ export class DungeonBuilder {
     rightJamb.position.set(spanWidth * 0.5, colH * 0.5, 0);
     group.add(rightJamb);
 
-    const flameMat = new THREE.MeshStandardMaterial({ color: 0xff8800, emissive: 0xffaa22, emissiveIntensity: 2.8 });
+    const flameMat = this.materials.archFlame;
     const leftFlame = new THREE.Mesh(new THREE.DodecahedronGeometry(0.28), flameMat);
     leftFlame.position.set(-spanWidth * 0.5, colH + 0.25, 0);
     group.add(leftFlame);

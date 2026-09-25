@@ -114,6 +114,22 @@ const PRODUCTS = [
     grants: { skins: [], weaponGlows: [], emotes: ['emote_shadow_dance'] },
     emote: { sequence: ['jump', 'victory', 'jump', 'victory'], holdMs: 650 }
   },
+  // ---- Season pass: PHASE 4 (workstream 1). Unlocks the PREMIUM reward track
+  // of the CURRENT season's battle pass. Still cosmetics-only: the entitlement
+  // recorded by BattlePass unlocks tier REWARD CLAIMS (skins/glows/emotes) —
+  // never stats, XP, loot, or power. Premium lasts for the season in which it
+  // was purchased, then resets with the season.
+  {
+    id: 'pass_premium_season',
+    kind: 'seasonpass',
+    name: 'Covenant Season Pass — Premium',
+    icon: '🎟️',
+    description: 'Unlocks all 20 premium-tier cosmetic rewards for the CURRENT season (skins, weapon glows, emotes). Season XP still has to be earned — this pass grants no XP and no power. Cosmetic only — never pay-to-win.',
+    amountCents: 999,
+    currency: 'usd',
+    grants: { skins: [], weaponGlows: [], emotes: [] },
+    seasonPass: true
+  },
   // ---- Bundle: every cosmetic in the shop, one price.
   {
     id: 'bundle_covenant_collector',

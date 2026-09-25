@@ -421,12 +421,45 @@ function grantRunRewards(room, { victory = false } = {}) {
     m.lifetimeRuns += 1;
     if (victory) m.lifetimeVictories += 1;
 
+    // PHASE 4 (workstream 1): season XP — the same server-computed value as
+    // covenant account XP, stored as this season's slice (resets each
+    // season). Also accumulates into the weekly "most season XP"
+    // leaderboard. Never breaks run rewards if season systems fail.
+    let seasonXpGained = 0;
+    try {
+      const SeasonService = require('./SeasonService');
+      const Leaderboards = require('./Leaderboards');
+      const seasonGain = SeasonService.awardSeasonXp(profile, rewards.accountXp);
+      if (seasonGain) {
+        seasonXpGained = seasonGain.gained;
+        Leaderboards.submit('season_xp', {
+          username: player.accountUsername,
+          displayName: profile.displayName || player.name,
+          value: seasonGain.gained
+        });
+      }
+    } catch (e) { /* season systems must never break run rewards */ }
+
+    // PHASE 4 (workstream 2): coven XP — shared coven progression fed by the
+    // same server-computed account XP. Level-ups are reported on the reward
+    // row so the client can toast them. Never breaks run rewards.
+    let covenGain = null;
+    try {
+      const CovenService = require('./CovenService');
+      covenGain = CovenService.awardRunXp(player.accountUsername, rewards.accountXp, { victory });
+    } catch (e) { /* coven systems must never break run rewards */ }
+
     const newRank = rankForXp(m.accountXp);
     results.push({
       playerId: player.id,
       name: player.name,
       accountXpGained: rewards.accountXp,
       sealsGained: rewards.seals,
+      seasonXpGained,
+      covenXpGained: covenGain ? covenGain.xpGained : 0,
+      covenLevelUp: covenGain ? covenGain.leveledUp : false,
+      covenName: covenGain ? covenGain.covenName : null,
+      covenLevelName: covenGain ? covenGain.levelName : null,
       victory,
       rankUp: newRank.index > oldRank.index,
       rank: { index: newRank.index, name: newRank.name, icon: newRank.icon },

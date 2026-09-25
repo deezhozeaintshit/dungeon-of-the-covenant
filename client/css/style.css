@@ -133,7 +133,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 .btn.danger { border-color: var(--blood-hi); color: #fecaca; }
 
 .btn-sm {
-  min-height: 36px;
+  min-height: 44px; /* [Phase4-WS5] 44px minimum touch target */
   padding: 8px 12px;
   font-size: 0.8rem;
   font-weight: 700;
@@ -860,14 +860,14 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 #btn-generate-floor {
   background: linear-gradient(90deg, #099268, #20c997);
   color: #071712; border: none; border-radius: 8px;
-  padding: 8px 12px; min-height: 40px;
+  padding: 8px 12px; min-height: 44px; /* [Phase4-WS5] 44px touch target */
   font-size: 0.68rem; font-weight: 900; cursor: pointer;
   box-shadow: var(--shadow);
 }
 #btn-min-right-stack {
   background: var(--panel); color: var(--gold-hi);
   border: 1px solid var(--panel-line); border-radius: 8px;
-  padding: 8px 10px; min-height: 40px;
+  padding: 8px 10px; min-height: 44px; /* [Phase4-WS5] 44px touch target */
   font-size: 0.68rem; font-weight: 800; cursor: pointer;
 }
 #right-hud-body { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
@@ -891,7 +891,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 }
 .cam-controls button {
   background: #231b33; color: #fff; border: 1px solid #6b568a;
-  border-radius: 6px; padding: 6px 8px; min-width: 40px; min-height: 40px;
+  border-radius: 6px; padding: 6px 8px; min-width: 44px; min-height: 44px; /* [Phase4-WS5] 44px touch target */
   font-size: 0.72rem; font-weight: 800; cursor: pointer;
 }
 .cam-controls button:hover { border-color: var(--gold); }
@@ -1099,6 +1099,54 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
   width: 220px; height: 220px;
   z-index: 56;
   pointer-events: none;
+}
+
+/* ==========================================================================
+   [Phase4-WS5] TOUCH LAYER GATING + GAME-SURFACE TOUCH DEFAULTS + WCAG
+   ========================================================================== */
+
+/* Touch layer is completely inert unless the touch manager enables it
+   (body.touch-active from Auto/On detection or the Settings toggle).
+   The ping trigger stays available on desktop. */
+body:not(.touch-active) #joystick-zone,
+body:not(.touch-active) .abilities-zone .action-btn:not(#btn-open-ping) {
+  display: none !important;
+}
+
+/* Kill game-breaking touch defaults on the play surface:
+   no pull-to-refresh, no pinch-zoom hijack, no 300ms tap delay,
+   no page scroll or text selection during play. Multi-touch still works
+   because each touch is tracked by identifier in controls.js. */
+#canvas-container,
+#canvas-container canvas,
+#joystick-zone,
+.abilities-zone {
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+body.touch-active {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* WCAG 2.1 AA: visible keyboard focus on every touch control; the existing
+   :active press state already gives a visible press indication. */
+.action-btn:focus-visible {
+  outline: 3px solid var(--gold-hi);
+  outline-offset: 3px;
+}
+.action-btn:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Disabled-while-on-cooldown state: dimmed but still labeled for AT. */
+.action-btn[aria-disabled="true"] {
+  filter: saturate(0.4) brightness(0.75);
+}
+/* Cooldown overlay text: white on near-black = 15.6:1 contrast. */
+.skill-cooldown-overlay {
+  text-shadow: 0 1px 2px #000;
 }
 .action-btn {
   position: absolute;
@@ -1467,9 +1515,13 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
   #dungeon-minimap { width: 104px; height: 104px; }
   #procedural-floor-panel { width: 132px; }
   .player-vitals { width: 52vw; bottom: calc(170px + var(--safe-b)); }
-  #tactical-command-bar { bottom: calc(8px + var(--safe-b)); max-width: 98vw; }
-  .tac-btn { font-size: 0.64rem; padding: 8px 6px; }
-  .abilities-zone { transform: scale(0.86); transform-origin: bottom right; bottom: calc(70px + var(--safe-b)); }
+  #tactical-command-bar { bottom: calc(8px + var(--safe-b)); max-width: 98vw; overflow-x: auto; }
+  .tac-btn { font-size: 0.64rem; padding: 8px 6px; min-height: 44px; /* [Phase4-WS5] 44px touch target */ }
+  #btn-min-tactical { min-height: 44px; /* [Phase4-WS5] 44px touch target */ }
+  /* [Phase4-WS5] 360px baseline: ability arc clears the tactical bar and
+     event toasts; vitals stay above the joystick zone (pointer-events:none). */
+  .abilities-zone { transform: scale(0.86); transform-origin: bottom right; bottom: calc(76px + var(--safe-b)); }
+  #joystick-zone { width: 46vw; height: 48vh; }
   .kill-feed { top: calc(210px + var(--safe-t)); max-width: 44vw; }
   .secret-card { right: calc(8px + var(--safe-r)); top: calc(240px + var(--safe-t)); width: 280px; }
   .event-toasts { bottom: calc(120px + var(--safe-b)); }

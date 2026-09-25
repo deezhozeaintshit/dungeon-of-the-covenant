@@ -400,6 +400,32 @@ class StripeService {
         return { received: true, duplicate: true };
       }
 
+      // PHASE 4 (workstream 1): season-pass premium product. The entitlement
+      // recorded is a current-season premium FLAG (BattlePass), not a shop
+      // cosmetic — payment was confirmed above (signature + paid status).
+      if (product.kind === 'seasonpass') {
+        const BattlePass = require('./game/systems/BattlePass');
+        const passResult = BattlePass.grantPremiumFromPurchase(accountToken);
+        if (!passResult || !passResult.ok) {
+          console.warn('[StripeService] Season-pass webhook grant failed:', passResult?.error);
+          return { received: true, ignored: 'grant_failed' };
+        }
+        if (sessionKey) {
+          this._recordGrantedSession(sessionKey, {
+            productId: product.id,
+            accountToken,
+            source: 'webhook',
+            seasonId: passResult.seasonId
+          });
+        }
+        if (event.id) {
+          this.grantedSessions[`evt_${event.id}`] = { grantedAt: new Date().toISOString(), source: 'webhook_event' };
+          this._saveGrantedSessions();
+        }
+        console.log(`[StripeService] Granted season-pass premium (season ${passResult.seasonId}) via webhook.`);
+        return { received: true, granted: 'season_pass_premium' };
+      }
+
       const grant = authService.grantCosmeticEntitlement(accountToken, product.id);
       if (!grant || !grant.ok) {
         console.warn('[StripeService] Webhook grant failed:', grant?.error);
