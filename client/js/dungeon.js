@@ -1,6 +1,10 @@
 // dungeon.js - Multi-Wing 3D Citadel Geometry (Atrium, Crossroads, West Catacombs, East Vault, Abyssal Bridge & Soul-Forge Sanctum)
 import * as THREE from '/vendor/three.module.js';
 import { GLTFLoader } from '/vendor/addons/loaders/GLTFLoader.js';
+// Level-design track: themed biome templates, seeded prop placement, atmosphere
+import { assignZoneBiomes, dominantTemplate, hashSeed, mulberry32, KEEP_OUTS, resolveBiomeTemplate } from './biomes.js';
+import { PropPlacer } from './propPlacer.js';
+import { Atmosphere } from './atmosphere.js';
 
 export class DungeonBuilder {
   constructor(scene) {
@@ -9,9 +13,24 @@ export class DungeonBuilder {
     this.glbCache = {};
     this.proceduralPropsGroup = new THREE.Group();
     this.scene.add(this.proceduralPropsGroup);
+    this.torchSpots = [];
     this.materials = this.initMaterials();
     this.buildDungeon();
     this.loadDefaultBlenderProps();
+    // Themed biome systems: per-zone prop decoration + atmosphere (fog,
+    // particles, torch flicker). Activated per floor via
+    // applyProceduralFloorConfig().
+    this.atmosphere = new Atmosphere(this.scene);
+    this.propPlacer = new PropPlacer(this.scene, this.atmosphere);
+    this.propPlacer.setKeepOuts(KEEP_OUTS);
+    this.lastZoneBiomes = [];
+    this._finalizeTorches();
+  }
+
+  // Per-frame tick for atmosphere animation. The coordinator wires this into
+  // the main render loop (see client/INTEGRATION_LEVELS.txt).
+  update(dt, t) {
+    if (this.atmosphere) this.atmosphere.update(dt, t);
   }
 
   initMaterials() {
@@ -504,14 +523,28 @@ export class DungeonBuilder {
       const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.15, 0.35, 6), this.materials.iron);
       sconce.add(bowl);
 
-      const flame = new THREE.Mesh(
-        new THREE.DodecahedronGeometry(0.28),
-        new THREE.MeshStandardMaterial({ color: 0xff6600, emissive: 0xffaa00, emissiveIntensity: 3.2 })
-      );
-      flame.position.y = 0.3;
-      sconce.add(flame);
+      // Flame sprite + flicker light are attached in _finalizeTorches(),
+      // once the Atmosphere exists (it is created after buildDungeon()).
+      this.torchSpots.push({ x: pos.x, y: 3.2, z: pos.z });
 
       parent.add(sconce);
+    });
+  }
+
+  // Attach flickering flame sprites + a capped set of real point lights to
+  // the citadel's wall sconces. Persistent across biome switches.
+  _finalizeTorches() {
+    const flameColor = 0xffaa44;
+    const lightColor = 0xff9540;
+    this.torchSpots.forEach((s, i) => {
+      const flame = this.atmosphere.makeFlameSprite(flameColor, 0.95, true);
+      flame.position.set(s.x, s.y + 0.35, s.z);
+      this.scene.add(flame);
+      // Every other sconce gets a real light; Atmosphere caps the total.
+      if (i % 2 === 0) {
+        const light = this.atmosphere.registerTorchLight(s.x, s.y + 0.55, s.z, lightColor, 1.5, 12, true);
+        if (light) this.scene.add(light);
+      }
     });
   }
 
@@ -589,11 +622,17 @@ export class DungeonBuilder {
     const ctx = canvas.getContext('2d');
 
     const palettes = {
+      // Legacy server biome ids (kept for API compatibility)
       ossuary_crypt:   { bg: '#221a17', tileA: '#3b2e28', tileB: '#2d221d', grout: '#ff5500', vein: '#ff9933' },
       glacial_sanctum: { bg: '#0c2238', tileA: '#1b4975', tileB: '#14385c', grout: '#33ddff', vein: '#a8f2ff' },
       blood_citadel:   { bg: '#1f060c', tileA: '#3d0c18', tileB: '#2b0810', grout: '#ff1144', vein: '#fbbf24' },
       void_nexus:      { bg: '#0b051c', tileA: '#1f1042', tileB: '#150a30', grout: '#b833ff', vein: '#00f0ff' },
-      blight_catacombs:{ bg: '#0a1c0e', tileA: '#1b3d22', tileB: '#132b18', grout: '#22ff66', vein: '#a3e635' }
+      blight_catacombs:{ bg: '#0a1c0e', tileA: '#1b3d22', tileB: '#132b18', grout: '#22ff66', vein: '#a3e635' },
+      // New themed biome template ids (levels track) — each a distinct language
+      crypt:       { bg: '#141c28', tileA: '#232d3f', tileB: '#1b2330', grout: '#3d5a80', vein: '#77ccff' },
+      cavern:      { bg: '#1c130b', tileA: '#33241a', tileB: '#271c13', grout: '#7a4a22', vein: '#ff8a3d' },
+      forge:       { bg: '#140d0b', tileA: '#241715', tileB: '#1c1210', grout: '#5a2a1a', vein: '#ff5a1a' },
+      throne_room: { bg: '#1c1626', tileA: '#2e2540', tileB: '#241e33', grout: '#6a5a2a', vein: '#d4af37' }
     };
     const pal = palettes[biomeId] || palettes.ossuary_crypt;
 
@@ -710,28 +749,44 @@ export class DungeonBuilder {
     });
   }
 
+  // Applies a procedural floor config (from the server's
+  // ProceduralLevelGenerator.generate()). Signature kept intact for main.js.
+  //
+  // Levels-track pipeline:
+  //   1. Legacy material retint (floor texture, liquid, wall/pillar/trim tints
+  //      from the server biome) — kept for compatibility.
+  //   2. NEW: seeded per-zone biome assignment -> themed prop decoration
+  //      (biomes.js + propPlacer.js), global fog/mood from the dominant
+  //      biome, per-zone particle systems (atmosphere.js).
+  //   3. GLB prop respawn (existing behavior, kept).
   applyProceduralFloorConfig(config) {
     if (!config) return;
 
-    const biomeId = config.biome?.id || 'ossuary_crypt';
+    const legacyId = config.biome?.id || 'ossuary_crypt';
+    const theme = resolveBiomeTemplate(legacyId);
 
-    // 1. Dynamically Regenerate Floor Tile Texture & Moat Liquid Shader per Biome!
+    // ---- 1. Legacy material retint (server biome palette) ----
     if (this.materials.floor) {
-      this.materials.floor.map = this.generateBiomeFloorTexture(biomeId);
-      this.materials.floor.roughness = biomeId === 'glacial_sanctum' ? 0.18 : 0.58;
-      this.materials.floor.metalness = biomeId === 'glacial_sanctum' ? 0.55 : 0.18;
+      this.materials.floor.map = this.generateBiomeFloorTexture(theme.id);
+      this.materials.floor.roughness = theme.id === 'throne_room' ? 0.42 : 0.62;
+      this.materials.floor.metalness = theme.id === 'throne_room' ? 0.3 : 0.14;
       this.materials.floor.needsUpdate = true;
     }
 
     if (this.materials.lava) {
       const liquidColors = {
+        crypt:       { col: 0x35c8ff, em: 0x0a66cc },
+        cavern:      { col: 0xff7a2a, em: 0xcc3300 },
+        forge:       { col: 0xff4400, em: 0xff2200 },
+        throne_room: { col: 0xd4af37, em: 0x8a6a1a },
+        // legacy fallbacks
         ossuary_crypt:   { col: 0xff4400, em: 0xff2200 },
         glacial_sanctum: { col: 0x00e5ff, em: 0x0088ff },
         blood_citadel:   { col: 0xff0033, em: 0xaa0018 },
         void_nexus:      { col: 0xa822ff, em: 0x6600cc },
         blight_catacombs:{ col: 0x22ff55, em: 0x00aa22 }
       };
-      const liq = liquidColors[biomeId] || liquidColors.ossuary_crypt;
+      const liq = liquidColors[theme.id] || liquidColors[legacyId] || liquidColors.forge;
       this.materials.lava.color.setHex(liq.col);
       this.materials.lava.emissive.setHex(liq.em);
       this.materials.lava.needsUpdate = true;
@@ -747,18 +802,38 @@ export class DungeonBuilder {
       if (config.biome.trimTint && this.materials.trim) {
         this.materials.trim.color.setHex(config.biome.trimTint);
       }
-      if (config.biome.fogColor && this.scene.fog) {
-        this.scene.fog.color.setHex(config.biome.fogColor);
-      }
     }
 
-    // 2. Clear and Respawn Both 3D Biome Architectural Landmarks & Procedural Blender Props
+    // ---- 2. Themed biome decoration (seeded per-zone assignment) ----
+    const seed = config.seed != null ? config.seed : Math.floor(Math.random() * 1e9);
+    const assignments = assignZoneBiomes(seed, theme.id);
+    const dominant = dominantTemplate(assignments);
+
+    // Global fog + lighting mood from the dominant biome
+    this.atmosphere.applyMood(dominant);
+
+    // Clear the previous biome pass (particles, biome torch lights, pulses)
+    this.atmosphere.clearBiome();
+
+    // Seeded prop placement per zone (pillars, sarcophagi, stalagmites,
+    // anvils, lava channels, chains, thrones, banners, braziers, torches...)
+    const rng = mulberry32(hashSeed(seed));
+    this.propPlacer.setKeepOuts(KEEP_OUTS);
+    this.propPlacer.decorateZones(assignments, rng);
+
+    // Per-zone particle systems (dust / ash / embers / motes)
+    for (const a of assignments) {
+      this.atmosphere.buildParticles(a.zone, a.template);
+    }
+
+    this.lastZoneBiomes = assignments.map((a) => ({ zone: a.zone.key, biome: a.template.id }));
+    this.lastDominantBiome = dominant.id;
+
+    // ---- 3. GLB props (existing behavior, kept) ----
     while (this.proceduralPropsGroup.children.length > 0) {
       const child = this.proceduralPropsGroup.children[0];
       this.proceduralPropsGroup.remove(child);
     }
-
-    this.spawnBiomeArchitecture(biomeId);
 
     const propList = Array.isArray(config.props) ? config.props : (Array.isArray(config.glbProps) ? config.glbProps : []);
     if (propList.length > 0) {

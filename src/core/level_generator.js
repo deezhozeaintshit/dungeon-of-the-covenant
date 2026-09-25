@@ -1,36 +1,94 @@
 // ============================================================
-// VOID WALKER - Random Level Generator
+// VOID WALKER - Random Level Generator (seeded, biome-tagged)
 // ============================================================
 
 /**
- * Procedural dungeon generation system
- * Uses room placement, corridor connection, and biome selection
+ * Procedural dungeon generation system.
+ * - Seeded RNG (mulberry32): same seed => same dungeon graph.
+ * - Every room is tagged with a biome from BIOME_IDS.
+ * - Corridors carry explicit door objects (exit/entry per room).
+ * - Every room gets a data-only prop plan (type/x/y/rot) for the
+ *   client-side prop placer to realize as 3D geometry.
  */
+
+'use strict';
+
+// ---------------------------------------------------------------- seeded RNG
+function hashSeed(seed) {
+  if (typeof seed === 'number' && Number.isFinite(seed)) return seed >>> 0;
+  const str = String(seed);
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+function mulberry32(seedInt) {
+  let a = seedInt >>> 0;
+  return function () {
+    a |= 0;
+    a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// ---------------------------------------------------------------- biome ids
+// Must match the template ids in client/js/biomes.js exactly.
+const BIOME_IDS = ['crypt', 'cavern', 'forge', 'throne_room'];
+
+// Data-only prop vocabularies per biome. The client prop placer turns
+// these type strings into real 3D geometry; the generator only plans.
+const BIOME_PROP_TABLE = {
+  crypt: ['sarcophagus', 'bone_pile', 'crypt_pillar', 'torch', 'altar', 'rubble'],
+  cavern: ['stalagmite', 'rock_spire', 'ember_vent', 'torch', 'rubble', 'stalactite'],
+  forge: ['anvil', 'lava_channel', 'hanging_chain', 'crucible', 'torch', 'rubble'],
+  throne_room: ['throne', 'grand_pillar', 'banner', 'brazier', 'chest', 'torch']
+};
 
 class LevelGenerator {
   constructor(seed) {
-    this.seed = seed || Date.now();
+    this.seed = seed == null ? Date.now() : seed;
+    this.rng = mulberry32(hashSeed(this.seed));
     this.rooms = [];
     this.corridors = [];
+    this.doors = [];
     this.enemies = [];
     this.loot = [];
     this.exit = null;
   }
 
+  // Seeded helpers (instance)
+  rand() { return this.rng(); }
+  randRange(min, max) { return Math.floor(this.rng() * (max - min + 1)) + min; }
+  randFloat(min, max) { return min + this.rng() * (max - min); }
+  pick(array) { return array[Math.floor(this.rng() * array.length)]; }
+
   // Generate a new level
   generate(width, height, roomCount, biome) {
     this.rooms = [];
     this.corridors = [];
+    this.doors = [];
     this.enemies = [];
     this.loot = [];
+    this.exit = null;
 
     // Place rooms
     for (let i = 0; i < roomCount; i++) {
       this.placeRoom(width, height);
     }
 
-    // Connect rooms
+    // Tag each room with a biome (spawn = throne_room, exit = forge)
+    this.assignBiomes();
+
+    // Connect rooms (also computes doors)
     this.connectRooms();
+
+    // Plan 3D props per room from biome templates
+    this.planAllRoomProps();
 
     // Place enemies
     this.populateEnemies(biome);
@@ -42,8 +100,10 @@ class LevelGenerator {
     this.placeExit(width, height);
 
     return {
+      seed: this.seed,
       rooms: this.rooms,
       corridors: this.corridors,
+      doors: this.doors,
       enemies: this.enemies,
       loot: this.loot,
       exit: this.exit
@@ -59,10 +119,10 @@ class LevelGenerator {
     let room = null;
 
     while (attempts < 50 && !room) {
-      const width = randomRange(minSize, maxSize);
-      const height = randomRange(minSize, maxSize);
-      const x = randomRange(5, maxWidth - width - 5);
-      const y = randomRange(5, maxHeight - height - 5);
+      const width = this.randRange(minSize, maxSize);
+      const height = this.randRange(minSize, maxSize);
+      const x = this.randRange(5, maxWidth - width - 5);
+      const y = this.randRange(5, maxHeight - height - 5);
 
       const newRoom = { x, y, w: width, h: height };
 
@@ -73,6 +133,7 @@ class LevelGenerator {
     }
 
     if (room) {
+      room.center = { x: room.x + room.w / 2, y: room.y + room.h / 2 };
       this.rooms.push(room);
     }
   }
@@ -90,29 +151,125 @@ class LevelGenerator {
     return false;
   }
 
-  // Connect rooms with corridors
+  // Assign a biome id to every room. First room (spawn) reads grand,
+  // last room (exit/boss) reads infernal; middle rooms vary by seed and
+  // never repeat the biome of the previously placed room.
+  assignBiomes() {
+    const n = this.rooms.length;
+    this.rooms.forEach((room, i) => {
+      let b;
+      if (i === 0) {
+        b = 'throne_room';
+      } else if (i === n - 1) {
+        b = 'forge';
+      } else {
+        const prev = this.rooms[i - 1].biome;
+        let guard = 0;
+        do {
+          b = this.pick(BIOME_IDS);
+          guard++;
+        } while (b === prev && guard < 12);
+      }
+      room.biome = b;
+      room.biomeIndex = BIOME_IDS.indexOf(b);
+    });
+  }
+
+  // Connect rooms with corridors (and compute doors on both ends)
   connectRooms() {
     for (let i = 1; i < this.rooms.length; i++) {
       const prev = this.rooms[i - 1];
       const curr = this.rooms[i];
 
-      const prevCenter = {
-        x: prev.x + prev.w / 2,
-        y: prev.y + prev.h / 2
-      };
-      const currCenter = {
-        x: curr.x + curr.w / 2,
-        y: curr.y + curr.h / 2
-      };
+      const prevCenter = { x: prev.x + prev.w / 2, y: prev.y + prev.h / 2 };
+      const currCenter = { x: curr.x + curr.w / 2, y: curr.y + curr.h / 2 };
 
-      // Create L-shaped corridor
-      this.corridors.push({
+      // L-shaped corridor: horizontal leg first, then vertical leg
+      const corridor = {
         x1: prevCenter.x,
         y1: prevCenter.y,
         x2: currCenter.x,
-        y2: currCenter.y
+        y2: currCenter.y,
+        roomA: i - 1,
+        roomB: i
+      };
+      const path = [
+        { x: prevCenter.x, y: prevCenter.y },
+        { x: currCenter.x, y: prevCenter.y },
+        { x: currCenter.x, y: currCenter.y }
+      ];
+      const doorA = this.traceRoomBoundary(prev, path, false);
+      const doorB = this.traceRoomBoundary(curr, path, true);
+      corridor.doors = [
+        { x: doorA.x, y: doorA.y, roomIndex: i - 1, kind: 'exit', corridorIndex: i - 1 },
+        { x: doorB.x, y: doorB.y, roomIndex: i, kind: 'entry', corridorIndex: i - 1 }
+      ];
+      this.corridors.push(corridor);
+      this.doors.push(corridor.doors[0], corridor.doors[1]);
+    }
+  }
+
+  // Walk an L-shaped path and find where it leaves (forward=false) or
+  // enters (forward=true, walked in reverse) a room's rectangle.
+  traceRoomBoundary(room, path, reversed) {
+    const rect = { minX: room.x, minY: room.y, maxX: room.x + room.w, maxY: room.y + room.h };
+    const inRect = (p) => p.x >= rect.minX && p.x <= rect.maxX && p.y >= rect.minY && p.y <= rect.maxY;
+    const pts = reversed ? [path[2], path[1], path[0]] : path;
+    for (let s = 0; s < pts.length - 1; s++) {
+      const a = pts[s];
+      const b = pts[s + 1];
+      const dist = Math.hypot(b.x - a.x, b.y - a.y);
+      const steps = Math.max(1, Math.ceil(dist / 0.5));
+      for (let k = 0; k <= steps; k++) {
+        const p = { x: a.x + ((b.x - a.x) * k) / steps, y: a.y + ((b.y - a.y) * k) / steps };
+        if (!inRect(p)) {
+          return { x: Number(p.x.toFixed(2)), y: Number(p.y.toFixed(2)) };
+        }
+      }
+    }
+    // Degenerate fallback: room center (should not happen for valid graphs)
+    return { x: Number((room.x + room.w / 2).toFixed(2)), y: Number((room.y + room.h / 2).toFixed(2)) };
+  }
+
+  // Build a data-only prop plan for every room from its biome template.
+  planAllRoomProps() {
+    this.rooms.forEach((room, i) => {
+      const isSpawn = i === 0;
+      const isExit = i === this.rooms.length - 1;
+      room.props = this.planRoomProps(room, isSpawn, isExit);
+    });
+  }
+
+  planRoomProps(room, isSpawn, isExit) {
+    const table = BIOME_PROP_TABLE[room.biome] || BIOME_PROP_TABLE.crypt;
+    const area = room.w * room.h;
+    const count = area < 120 ? this.randRange(3, 4) : area < 240 ? this.randRange(5, 6) : this.randRange(6, 8);
+    const props = [];
+    const margin = 2.0;
+    let guard = 0;
+    while (props.length < count && guard < 60) {
+      guard++;
+      const type = this.pick(table);
+      const px = this.randFloat(room.x + margin, room.x + room.w - margin);
+      const py = this.randFloat(room.y + margin, room.y + room.h - margin);
+      // Keep spawn/exit centers walkable
+      const cx = room.x + room.w / 2;
+      const cy = room.y + room.h / 2;
+      if ((isSpawn || isExit) && Math.hypot(px - cx, py - cy) < 3.0) continue;
+      // Keep props apart from each other
+      let ok = true;
+      for (const q of props) {
+        if (Math.hypot(px - q.x, py - q.y) < 2.2) { ok = false; break; }
+      }
+      if (!ok) continue;
+      props.push({
+        type,
+        x: Number(px.toFixed(2)),
+        y: Number(py.toFixed(2)),
+        rot: Number(this.randFloat(0, Math.PI * 2).toFixed(2))
       });
     }
+    return props;
   }
 
   // Place enemies based on biome
@@ -127,13 +284,13 @@ class LevelGenerator {
       if (room === this.rooms[this.rooms.length - 1]) continue;
 
       // Place 1-3 enemies per room
-      const enemyCount = randomRange(1, 3);
+      const enemyCount = this.randRange(1, 3);
       for (let i = 0; i < enemyCount; i++) {
-        const enemyType = biomeEnemies[randomRange(0, biomeEnemies.length - 1)];
+        const enemyType = this.pick(biomeEnemies);
         this.enemies.push({
           type: enemyType,
-          x: room.x + randomRange(1, room.w - 1),
-          y: room.y + randomRange(1, room.h - 1),
+          x: room.x + this.randRange(1, room.w - 1),
+          y: room.y + this.randRange(1, room.h - 1),
           room: room
         });
       }
@@ -143,12 +300,12 @@ class LevelGenerator {
   // Place loot in rooms
   populateLoot() {
     for (let i = 1; i < this.rooms.length - 1; i++) {
-      if (Math.random() < 0.6) {
+      if (this.rand() < 0.6) {
         const room = this.rooms[i];
         this.loot.push({
-          type: randomChoice(['chest', 'ground']),
-          x: room.x + randomRange(1, room.w - 1),
-          y: room.y + randomRange(1, room.h - 1),
+          type: this.pick(['chest', 'ground']),
+          x: room.x + this.randRange(1, room.w - 1),
+          y: room.y + this.randRange(1, room.h - 1),
           room: room
         });
       }
@@ -168,7 +325,7 @@ class LevelGenerator {
   }
 }
 
-// Helper functions
+// Helper functions (legacy, unseeded — kept for backward compatibility)
 function randomRange(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
@@ -212,6 +369,17 @@ class DungeonGenerator {
     for (let i = 0; i < this.options.roomCount; i++) {
       this.generateRoom();
     }
+
+    // Tag rooms with biomes (no adjacent repeats)
+    this.rooms.forEach((room, i) => {
+      let b;
+      let guard = 0;
+      do {
+        b = randomChoice(BIOME_IDS);
+        guard++;
+      } while (i > 0 && b === this.rooms[i - 1].biome && guard < 12);
+      room.biome = b;
+    });
 
     // Connect rooms
     this.connectRooms();
@@ -262,21 +430,96 @@ class DungeonGenerator {
   }
 
   carveCorridor(from, to) {
-    let x = from.x;
-    let y = from.y;
+    // Round to integer grid cells: fractional room centers would make the
+    // x !== to.x loop below never terminate.
+    let x = Math.round(from.x);
+    let y = Math.round(from.y);
+    const tx = Math.round(to.x);
+    const ty = Math.round(to.y);
 
-    // Horizontal then vertical
-    while (x !== to.x) {
-      this.grid[y][x] = 1;
-      x += x < to.x ? 1 : -1;
+    let guard = 0;
+    while (x !== tx && guard++ < 10000) {
+      if (this.grid[y] && this.grid[y][x] !== undefined) this.grid[y][x] = 1;
+      x += x < tx ? 1 : -1;
     }
-    while (y !== to.y) {
-      this.grid[y][x] = 1;
-      y += y < to.y ? 1 : -1;
+    guard = 0;
+    while (y !== ty && guard++ < 10000) {
+      if (this.grid[y] && this.grid[y][x] !== undefined) this.grid[y][x] = 1;
+      y += y < ty ? 1 : -1;
     }
+    if (this.grid[y] && this.grid[y][x] !== undefined) this.grid[y][x] = 1;
 
     this.corridors.push({ from, to });
   }
 }
 
-module.exports = { LevelGenerator, DungeonGenerator };
+module.exports = { LevelGenerator, DungeonGenerator, BIOME_IDS, BIOME_PROP_TABLE, hashSeed, mulberry32 };
+
+// ---------------------------------------------------------------- self-test
+// Run: node src/core/level_generator.js
+if (require.main === module) {
+  const assert = require('assert');
+
+  const gen = new LevelGenerator(12345);
+  const d = gen.generate(60, 60, 10, 'void_hollow');
+
+  // 1. Rooms exist and each carries a valid biome tag
+  assert(d.rooms.length > 0, 'expected at least one room');
+  for (const r of d.rooms) {
+    assert(BIOME_IDS.includes(r.biome), `room missing/invalid biome tag: ${r.biome}`);
+    assert(Array.isArray(r.props) && r.props.length > 0, 'room missing prop plan');
+    for (const p of r.props) {
+      assert(BIOME_PROP_TABLE[r.biome].includes(p.type), `prop type ${p.type} not in ${r.biome} table`);
+      assert(p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h, 'prop outside room bounds');
+    }
+  }
+
+  // 2. Corridors connect the room graph; doors reference valid rooms
+  assert.strictEqual(d.corridors.length, d.rooms.length - 1, 'corridor count must be rooms-1');
+  assert.strictEqual(d.doors.length, d.corridors.length * 2, 'each corridor must emit 2 doors');
+  d.corridors.forEach((c, i) => {
+    assert.strictEqual(c.roomA, i, 'corridor roomA index');
+    assert.strictEqual(c.roomB, i + 1, 'corridor roomB index');
+    assert(Array.isArray(c.doors) && c.doors.length === 2, 'corridor doors');
+    for (const door of c.doors) {
+      assert(door.roomIndex === c.roomA || door.roomIndex === c.roomB, 'door references corridor room');
+      assert(door.kind === 'exit' || door.kind === 'entry', 'door kind');
+      assert(Number.isFinite(door.x) && Number.isFinite(door.y), 'door coords finite');
+    }
+  });
+
+  // 3. Spawn/exit rooms keep their centers clear of props
+  const spawn = d.rooms[0];
+  const scx = spawn.x + spawn.w / 2, scy = spawn.y + spawn.h / 2;
+  for (const p of spawn.props) {
+    assert(Math.hypot(p.x - scx, p.y - scy) >= 3.0, 'spawn center must stay clear');
+  }
+  assert.strictEqual(d.rooms[0].biome, 'throne_room', 'first room is throne_room');
+  assert.strictEqual(d.rooms[d.rooms.length - 1].biome, 'forge', 'last room is forge');
+
+  // 4. Determinism: same seed => same biome tags + same prop plans
+  const d2 = new LevelGenerator(12345).generate(60, 60, 10, 'void_hollow');
+  assert.deepStrictEqual(
+    d.rooms.map((r) => [r.biome, r.props]),
+    d2.rooms.map((r) => [r.biome, r.props]),
+    'same seed must reproduce biome tags and prop plans'
+  );
+
+  // 5. DungeonGenerator (grid variant) also tags biomes
+  const dg = new DungeonGenerator(60, 60, { roomCount: 6 }).generate();
+  assert(dg.rooms.length > 0, 'grid generator rooms');
+  for (const r of dg.rooms) assert(BIOME_IDS.includes(r.biome), 'grid room biome tag');
+
+  const biomeCounts = {};
+  d.rooms.forEach((r) => { biomeCounts[r.biome] = (biomeCounts[r.biome] || 0) + 1; });
+  console.log('level_generator self-test OK');
+  console.log(JSON.stringify({
+    seed: d.seed,
+    rooms: d.rooms.length,
+    corridors: d.corridors.length,
+    doors: d.doors.length,
+    enemies: d.enemies.length,
+    loot: d.loot.length,
+    biomeCounts
+  }));
+}
