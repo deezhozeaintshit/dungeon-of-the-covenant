@@ -390,35 +390,40 @@ class PhaseBoss {
   _startAttack(attackId, target, ctx, mods) {
     const dmg = (base) => Math.round(base * mods.damageMult);
     if (attackId === 'summon_adds') {
+      // Phase 3: adds are telegraphed now — the minions arrive when the
+      // windup resolves, not instantly (see _resolveTelegraph).
       if (typeof ctx.spawnAdds !== 'function') return; // coordinator must wire adds
       const n = 2 + (this.phaseIndex >= 1 ? 1 : 0);
+      const spots = [];
       for (let i = 0; i < n; i++) {
         const type = this.addsTypes[i % this.addsTypes.length];
         const ang = (Math.PI * 2 * i) / n + Math.random() * 0.6;
-        ctx.spawnAdds(type, this.x + Math.cos(ang) * 4, this.z + Math.sin(ang) * 4, 1);
+        spots.push({
+          type,
+          x: this.x + Math.cos(ang) * 4,
+          z: this.z + Math.sin(ang) * 4
+        });
       }
-      ctx.broadcast({
-        type: 'narrator_announcement',
-        text: `${this.name} rends the dark — minions crawl forth!`,
-        tone: 'danger'
+      this._broadcastTelegraph(ctx, {
+        kind: 'summon_adds', shape: 'circle',
+        x: this.x, z: this.z, radius: 5.0,
+        duration: 1.2, elapsed: 0,
+        spots, damage: 0, damageType: 'dark',
+        color: this.reskinTint
       });
       return;
     }
     if (attackId === 'volley') {
+      // Phase 3: the volley has a windup telegraph at the boss before the
+      // bolts fire (see _resolveTelegraph).
       if (typeof ctx.spawnProjectile !== 'function') return; // coordinator must wire projectiles
-      const bolts = 8 + this.phaseIndex * 4;
-      const baseAng = Math.atan2(target.x - this.x, target.z - this.z);
-      for (let i = 0; i < bolts; i++) {
-        const ang = baseAng + (i / bolts) * Math.PI * 2;
-        ctx.spawnProjectile({
-          isEnemy: true, sourceName: this.name,
-          x: this.x + Math.sin(ang) * 1.2, y: 1.4, z: this.z + Math.cos(ang) * 1.2,
-          vx: Math.sin(ang) * 9.5, vz: Math.cos(ang) * 9.5,
-          radius: 0.45, damage: dmg(30), damageType: 'dark',
-          color: this.reskinTint, life: 2.6
-        });
-      }
-      ctx.broadcast({ type: 'boss_attack_anim', attack: 'volley', bossId: this.id });
+      this._broadcastTelegraph(ctx, {
+        kind: 'volley', shape: 'circle',
+        x: this.x, z: this.z, radius: 3.5,
+        duration: 1.0, elapsed: 0,
+        damage: dmg(30), damageType: 'dark',
+        color: this.reskinTint
+      });
       return;
     }
 
@@ -452,6 +457,14 @@ class PhaseBoss {
     } else {
       return;
     }
+    this._broadcastTelegraph(ctx, tel);
+  }
+
+  // Broadcast the enemy_telegraph message ahead of the real attack and store
+  // the pending telegraph for server-side resolution. windupMs always equals
+  // duration*1000 so the client decal fills exactly until the hit lands.
+  _broadcastTelegraph(ctx, tel) {
+    if (!tel.id) tel.id = this._telId(ctx, tel.kind);
     this.activeTelegraph = tel;
     ctx.broadcast({
       type: 'enemy_telegraph',
@@ -473,6 +486,38 @@ class PhaseBoss {
   }
 
   _resolveTelegraph(tel, ctx) {
+    // volley / summon telegraphs are warnings, not impacts — no shake.
+    if (tel.kind === 'volley') {
+      const bolts = 8 + this.phaseIndex * 4;
+      const alive = Object.values(ctx.players || {}).filter(p => !p.isDowned && !p.isDead);
+      const aimAt = alive.length
+        ? alive.reduce((a, b) => (Math.hypot(a.x - this.x, a.z - this.z) <= Math.hypot(b.x - this.x, b.z - this.z) ? a : b))
+        : { x: this.x, z: this.z + 5 };
+      const baseAng = Math.atan2(aimAt.x - this.x, aimAt.z - this.z);
+      for (let i = 0; i < bolts; i++) {
+        const ang = baseAng + (i / bolts) * Math.PI * 2;
+        ctx.spawnProjectile({
+          isEnemy: true, sourceName: this.name,
+          x: this.x + Math.sin(ang) * 1.2, y: 1.4, z: this.z + Math.cos(ang) * 1.2,
+          vx: Math.sin(ang) * 9.5, vz: Math.cos(ang) * 9.5,
+          radius: 0.45, damage: tel.damage, damageType: tel.damageType,
+          color: this.reskinTint, life: 2.6
+        });
+      }
+      ctx.broadcast({ type: 'boss_attack_anim', attack: 'volley', bossId: this.id });
+      return;
+    }
+    if (tel.kind === 'summon_adds') {
+      if (typeof ctx.spawnAdds === 'function') {
+        for (const s of tel.spots || []) ctx.spawnAdds(s.type, s.x, s.z, 1);
+      }
+      ctx.broadcast({
+        type: 'narrator_announcement',
+        text: `${this.name} rends the dark — minions crawl forth!`,
+        tone: 'danger'
+      });
+      return;
+    }
     ctx.broadcast({ type: 'screen_shake', magnitude: 0.6, duration: 0.4 });
     if (tel.kind === 'leap') {
       this.x = tel.x;

@@ -27,6 +27,7 @@ import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
 // animation (Mixamo clips + procedural fallback), progression UI
 // (level-up choices, skill tree, death-respawn), and oath shrines.
 import { EnemyVisuals } from './enemies.js';
+import { MinimapEnhanced } from './minimapenhanced.js';
 // Phase 3 (workstream 3): game feel — pooled combat VFX, performance monitor,
 // quality-of-life settings (reduced motion honoring prefers-reduced-motion).
 import { EnhancedCombatVFX } from './enhancedcombatvfx.js?v=9.1';
@@ -300,6 +301,20 @@ class GameApp {
     } catch (err) {
       console.warn('[Phase2] EnemyVisuals init failed:', err);
       this.enemyVisuals = null;
+    }
+
+    // Phase 3: fog-of-war minimap (workstream 4). Subscribes to
+    // objectives_update itself; reset on new procedural floors.
+    try {
+      this.minimap = new MinimapEnhanced(document.getElementById('dungeon-minimap'), {
+        network: this.network
+      });
+      document.getElementById('btn-minimap-toggle')?.addEventListener('click', () => {
+        if (this.minimap) this.minimap.toggle();
+      });
+    } catch (err) {
+      console.warn('[Phase3] Minimap init failed:', err);
+      this.minimap = null;
     }
 
     // Phase 2: level-up choices, skill tree, death-respawn (workstream 5).
@@ -940,7 +955,7 @@ class GameApp {
     };
     document.getElementById('btn-audio-toggle')?.addEventListener('click', toggleAudio);
 
-    // Keyboard Shortcuts: [H] Clean HUD Toggle, [M] Audio Toggle, [I] Inventory, [Escape] Close Any Open Popup/Drawer/Modal
+    // Keyboard Shortcuts: [H] Clean HUD Toggle, [M] Audio Toggle, [I] Inventory, [G] Minimap Toggle, [Escape] Close Any Open Popup/Drawer/Modal
     window.addEventListener('keydown', (e) => {
       if (document.activeElement?.tagName === 'INPUT') return;
       if ((e.key === 'h' || e.key === 'H') && this.gameState === 'dungeon') {
@@ -949,6 +964,9 @@ class GameApp {
         toggleAudio();
       } else if ((e.key === 'i' || e.key === 'I') && this.gameState === 'dungeon') {
         if (this.inventoryPanel) this.inventoryPanel.toggle();
+      } else if ((e.key === 'g' || e.key === 'G') && this.gameState === 'dungeon') {
+        // Phase 3: toggle the fog-of-war minimap (workstream 4).
+        if (this.minimap) this.minimap.toggle();
       } else if (e.key === 'Escape') {
         if (this.inventoryPanel && this.inventoryPanel.isOpen) this.inventoryPanel.hide();
         document.getElementById('emporium-modal')?.classList.add('hidden');
@@ -1857,6 +1875,18 @@ class GameApp {
   }
 
   updateMinimap(snap, localP) {
+    // Phase 3 (workstream 4): delegate to the fog-of-war minimap. It draws
+    // the real citadel layout (client/js/minimapFog.js), shared party vision,
+    // fog-gated enemy markers, objective markers, and the boss-arena frame.
+    if (this.minimap) {
+      try {
+        this.minimap.update(snap, localP);
+        return;
+      } catch (err) {
+        console.warn('[Phase3] Minimap update failed:', err);
+        this.minimap = null;
+      }
+    }
     const canvas = document.getElementById('dungeon-minimap');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
