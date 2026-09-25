@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "videogamemcp.com": {
+      "url": "https://sse.videogamemcp.com/sse",
+      "enabled": true
+    },
+    "game-asset-mcp": {
+      "command": "node",
+      "args": ["C:\\Users\\deezh\\game-asset-mcp\\dist\\index.js"],
+      "env": {
+        "HUGGINGFACE_API_KEY": "hf_your_key_here"
+      }
+    },
+    "rpg-generator-mcp-server": {
+      "command": "node",
+      "args": ["C:\\Users\\deezh\\rpg-generator-mcp-server\\dist\\index.js"]
+    },
+    "summer-engine": {
+      "command": "npx",
+      "args": ["-y", "summer-engine", "mcp"]
+    }
+  }
+}

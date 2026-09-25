@@ -1,0 +1,33 @@
+{
+  "name": "ttrpg-generator-mcp-server",
+  "description": "",
+  "version": "1.0.0",
+  "author": "Guy Royse <guy@guy.dev> (https://guy.dev/)",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "dist"
+  ],
+  "bin": {
+    "ttrpg-generator-mcp-server": "./dist/main.js"
+  },
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "inspect": "npx @modelcontextprotocol/inspector tsx src/main.ts",
+    "build": "tsc && npm pack && npm install -g ./ttrpg-generator-mcp-server-1.0.0.tgz"
+  },
+  "private": true,
+  "ts-node": {
+    "esm": true
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "zod": "^3.24.3"
+  }
+}
