@@ -10,6 +10,9 @@ import { createAnimator } from './animation/AnimationStates.js';
 import { loadClipSet, HERO_STATE_PREFIX_OVERRIDES } from './animation/MixamoRig.js';
 // Phase 3 (workstream 6): cosmetic shop renderers (skins, weapon glows, emotes).
 import { syncPlayerCosmetics, playEmote } from './cosmetics.js?v=9.0';
+// HD hero models (client/js/hdHeroes.js): flag-gated integration path for
+// real rigged GLB heroes. HD_HEROES_ENABLED=false => zero behavior change.
+import { HD_HEROES_ENABLED, mountHdHero, getHdModel } from './hdHeroes.js?v=9.0';
 // [perf-workstream] batched mob threat rings (Phase 4).
 import { RingBatcher, isRingBatchingEnabled } from './perf/ringBatcher.js';
 
@@ -570,6 +573,19 @@ export class EntityManager {
     const classKey = p.classKey || 'juggernaut';
     const armorColor = this.getClassArmorColor(classKey);
     const trimColor = this.getClassTrimColor(classKey);
+
+    // HD hero path (client/js/hdHeroes.js): when the flag is on and the HD GLB
+    // for this class was preloaded, mount the real skinned model instead of
+    // the procedural hero. Graceful fallback to procedural otherwise —
+    // getHdModel() returns null when disabled or the file is missing.
+    if (HD_HEROES_ENABLED) {
+      const hdGltf = getHdModel(classKey);
+      if (hdGltf && mountHdHero(group, classKey, hdGltf, {
+        manager: this, name: p.name, isLocal, trimColor
+      })) {
+        return group;
+      }
+    }
 
     // Class-distinct body scale & stance!
     const classScales = {
@@ -1854,10 +1870,12 @@ export class EntityManager {
     // 2. Animate Heroes (Walk Cycle, Mid-Air Jump Pose, Class Wings/Companions/Orbs)
     for (const group of this.playerMeshes.values()) {
       const u = group.userData;
-      if (!u || !u.leftLeg || !u.rightLeg) continue;
+      if (!u) continue;
 
       // Phase 2: the animation state machine owns locomotion + procedural
       // fallback; legacy bone-tweening runs only for animator-less groups.
+      // (HD skinned heroes carry no pivot rig — the animator still drives
+      // them, so the animator check must come before the pivot guard.)
       if (u.animator) {
         u.animator.setLocomotion({ moving: !!u.isMoving, running: !!u.isRunning });
         u.animator.update(dt);
@@ -1865,6 +1883,7 @@ export class EntityManager {
         updateCombatAnimation(group, dt);
         continue;
       }
+      if (!u.leftLeg || !u.rightLeg) continue;
 
       u.idlePhase += dt * 2.8;
       const baseY = u.baseLevitateY || 0;
