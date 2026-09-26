@@ -33,7 +33,7 @@ import { clone as skeletonClone } from '/vendor/addons/utils/SkeletonUtils.js';
 // Master switch. false = procedural heroes everywhere (shipped behavior).
 // Flip to true only when the hero_<class>_hd.glb files exist and pass the
 // acceptance checklist in client/assets/models/HD_HERO_CONTRACT.md.
-export const HD_HEROES_ENABLED = false;
+export const HD_HEROES_ENABLED = true;
 
 export const HD_HERO_CLASSES = [
   'juggernaut', 'cleric', 'rogue', 'mage', 'ranger', 'necromancer'

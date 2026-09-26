@@ -45,7 +45,7 @@ import { clone as skeletonClone } from '/vendor/addons/utils/SkeletonUtils.js';
 // Master switch. false = procedural mobs/bosses everywhere (shipped behavior).
 // Flip to true only when the enemy_<type>_hd.glb / boss_<key>_hd.glb files
 // exist and pass the acceptance checklist in HD_ENEMY_CONTRACT.md.
-export const HD_ENEMIES_ENABLED = false;
+export const HD_ENEMIES_ENABLED = true;
 
 // Canonical server mob types with HD models. cinder_thrall mounts its real
 // GLB already and is excluded on purpose.
