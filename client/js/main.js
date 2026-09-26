@@ -59,6 +59,12 @@ import { initRiftUI } from './ui/riftUI.js';
 import { initCovenUI } from './ui/covenUI.js';
 // Phase 3: server-authoritative loot inventory + equipment panel (workstream 2).
 import { initInventoryPanel } from './ui/inventory.js';
+// HD art rebuild: preload rigged GLB heroes/enemies at boot so the HD mount
+// path in entities.js actually finds models in the cache (previously the
+// preload was never called, so every client silently fell back to the
+// procedural models despite the flags being on).
+import { preloadHdHeroes } from './hdHeroes.js?v=9.0';
+import { preloadHdEnemies } from './hdEnemies.js?v=9.0';
 
 const _projV = new THREE.Vector3(); // shared projector scratch vector
 
@@ -178,14 +184,23 @@ class GameApp {
     this.container = document.getElementById('canvas-container');
 
     // Initialize AAA systems
-    this.audio = new AudioManager();
-    this.iap = new InAppPurchaseManager();
+    this.audio = new AudioManager();    this.iap = new InAppPurchaseManager();
     this.achievements = new AchievementSystem();
     this.saveSystem = new SaveSystem();
     this.tutorial = new TutorialSystem(this);
 
     // Load saved progress
     this.loadGameProgress();
+
+    // HD art rebuild: kick off GLB preloads now (fire-and-forget) so the
+    // rigged hero/enemy models are in cache by the time a run starts.
+    // Non-blocking: menu and lobby work even if the downloads are slow.
+    try {
+      preloadHdHeroes().catch((e) => console.warn('[HD] hero preload failed:', e));
+      preloadHdEnemies().catch((e) => console.warn('[HD] enemy preload failed:', e));
+    } catch (e) {
+      console.warn('[HD] preload kickoff failed:', e);
+    }
 
     // 1. Initialize Network & UI FIRST so lobby and room creation are never blocked
     this.narrator = new NarratorSystem(this.audio);
