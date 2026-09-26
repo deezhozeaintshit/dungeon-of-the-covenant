@@ -1032,27 +1032,29 @@ body.in-run #narrator-banner { top: calc(196px + var(--safe-t)); }
   padding: 1px 5px;
 }
 
-/* ---------- event toasts ---------- */
+/* ---------- event toasts ----------
+   Top-right stack (out of the action zone), compact + semi-transparent. */
 .event-toasts {
   position: absolute;
-  bottom: calc(86px + var(--safe-b));
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex; flex-direction: column-reverse; align-items: center; gap: 6px;
+  top: calc(64px + var(--safe-t));
+  right: calc(10px + var(--safe-r));
+  left: auto; bottom: auto;
+  transform: none;
+  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
   pointer-events: none;
-  max-width: 90vw;
+  max-width: 60vw;
 }
 .event-toast {
-  font-size: 0.8rem; font-weight: 700;
+  font-size: 0.68rem; font-weight: 700;
   color: var(--parchment);
-  background: var(--panel);
+  background: rgba(10, 7, 18, 0.72);
   border: 1px solid var(--panel-line);
-  border-radius: 10px;
-  padding: 8px 16px;
+  border-radius: 8px;
+  padding: 5px 10px;
   box-shadow: var(--shadow);
   animation: toast-in 0.25s ease;
   white-space: nowrap;
-  max-width: 90vw;
+  max-width: 60vw;
   overflow: hidden; text-overflow: ellipsis;
 }
 .event-toast.gold { border-color: var(--gold); color: var(--gold-hi); }
@@ -1094,6 +1096,8 @@ body.in-run #narrator-banner { top: calc(196px + var(--safe-t)); }
 .tac-spikes { background: #14532d; border-color: #4ade80; color: #86efac; }
 .tac-drain { background: #065f46; border-color: #10b981; color: #a7f3d0; }
 .tac-explosion { background: #4c1d95; border-color: #c084fc; color: #e9d5ff; }
+.tac-bag { background: #3b2f1e; border-color: #d4a24c; color: #f5d9a0; }
+.tac-skills { background: #2a1a4c; border-color: #a78bfa; color: #d8c9ff; }
 .tac-divider { width: 1px; height: 22px; background: rgba(255, 255, 255, 0.2); }
 
 /* ---------- ping wheel ---------- */
@@ -1630,7 +1634,8 @@ body.touch-active {
   #joystick-zone { width: 46vw; height: 48vh; }
   .kill-feed { top: calc(210px + var(--safe-t)); max-width: 44vw; }
   #right-rail .secret-card { width: 280px; max-width: 88vw; }
-  .event-toasts { bottom: calc(120px + var(--safe-b)); }
+  .event-toasts { max-width: 56vw; }
+  .event-toast { max-width: 56vw; }
   .class-grid { grid-template-columns: repeat(3, 1fr); }
   .class-btn { min-height: 88px; }
 }

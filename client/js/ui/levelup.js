@@ -19,6 +19,7 @@ function injectStyles() {
     background:radial-gradient(ellipse at center, rgba(20,10,40,.82), rgba(6,3,9,.94));backdrop-filter:blur(3px)}
   .cov-levelup-overlay.hidden{display:none}
   .cov-levelup-frame{max-width:980px;width:min(94vw,980px);text-align:center;padding:26px 18px 30px;
+    max-height:92dvh;max-height:92vh;overflow-y:auto;overscroll-behavior:contain;
     background:${T.panel};border:1px solid ${T.panelLine};border-radius:14px;
     box-shadow:0 0 60px rgba(157,78,221,.35), inset 0 0 40px rgba(0,0,0,.55)}
   .cov-levelup-title{font-family:${T.fontDisplay};color:${T.goldHi};font-size:34px;letter-spacing:4px;margin:0 0 4px;

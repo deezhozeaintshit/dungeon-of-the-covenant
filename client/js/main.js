@@ -972,6 +972,17 @@ class GameApp {
       });
     });
 
+    // Mobile menu: Bag (inventory/equip) + Skills (skill tree) — mirrors the
+    // I / T keybinds for players without a keyboard.
+    document.getElementById('btn-tac-bag')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.gameState === 'dungeon' && this.inventoryPanel) this.inventoryPanel.toggle();
+    });
+    document.getElementById('btn-tac-skills')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.skillTreePanel) this.skillTreePanel.toggle();
+    });
+
     // Covenant Gold Forge Drawer & Upgrade Buttons
     const forgePanel = document.getElementById('forge-panel');
     document.getElementById('btn-forge-toggle')?.addEventListener('click', (e) => {
@@ -1127,6 +1138,11 @@ class GameApp {
       id: 'inventory', priority: 80,
       isOpen: () => !!this.inventoryPanel?.isOpen,
       close: () => this.inventoryPanel?.hide(),
+    });
+    registerEscapeLayer({
+      id: 'skilltree', priority: 80,
+      isOpen: () => !!this.skillTreePanel?.isOpen,
+      close: () => this.skillTreePanel?.hide(),
     });
     hiddenClassLayer('emporium', 'emporium-modal');
     hiddenClassLayer('forge', 'forge-panel');
