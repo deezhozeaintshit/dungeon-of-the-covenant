@@ -1068,7 +1068,9 @@ body.in-run #narrator-banner { top: calc(196px + var(--safe-t)); }
   bottom: calc(12px + var(--safe-b));
   left: 50%;
   transform: translateX(-50%);
-  z-index: 55;
+  /* [menu-layer-fix] above the joystick zone (56) so the deck and its
+     minimize button always receive taps on phones; below the ping wheel. */
+  z-index: 60;
   display: flex; align-items: center; gap: 6px;
   background: var(--panel);
   border: 1.5px solid var(--panel-line);
@@ -1156,6 +1158,33 @@ body.in-run #narrator-banner { top: calc(196px + var(--safe-t)); }
   width: 220px; height: 220px;
   z-index: 56;
   pointer-events: none;
+}
+
+/* ==========================================================================
+   [menu-layer-fix] MENU LAYER SCALE — touch controls vs. menus
+   ==========================================================================
+   Layer scale (low to high):
+     10 = touch controls while a menu is open (dropped, see below)
+     41-45 = HUD vitals / banners
+     50 = #game-hud root
+     56 = joystick zone + ability arc (normal play)
+     60 = tactical command bar (its minimize button must beat the joystick)
+     80 = ping wheel
+     100-120 = drawer + scrim
+     150+ = screen overlays, modals, dialogs (6000-9600 for full overlays)
+   While ANY dismissible layer is open, ui/escapeManager.js toggles
+   `menu-open` on <body>: the joystick zone and ability arc drop to z-10 so
+   every menu — including its close button — renders above them and receives
+   taps first. This is what guarantees "you can always close it" on a phone.
+   ========================================================================== */
+body.menu-open #joystick-zone,
+body.menu-open .abilities-zone {
+  z-index: 10;
+}
+/* The joystick visuals must stay reachable for sighted touch users even when
+   dropped: keep the zone itself painted, just underneath the open menu. */
+body.menu-open #joystick-zone {
+  opacity: 0.55;
 }
 
 /* ==========================================================================
