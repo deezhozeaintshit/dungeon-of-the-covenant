@@ -179,36 +179,41 @@ function resolvePositionScale(clip, target, rig, opts) {
   return dstH / srcH;
 }
 
-// Make position tracks relative to their first keyframe so the clip animates
-// AROUND the rig's base pose instead of teleporting it to Mixamo's bind pose.
-function relativizePositionTrack(track) {
+// Make position tracks relative to their first keyframe, re-centered on the
+// target node's base-pose local position, so the clip animates AROUND the
+// rig's base pose instead of teleporting the node to Mixamo's bind pose —
+// or to the parent origin (three.js applies position tracks as absolute
+// local positions, so a zero-centered delta drops the hips to the floor).
+function relativizePositionTrack(track, base) {
   const n = track.values.length / 3;
   if (n < 1) return track;
   const bx = track.values[0], by = track.values[1], bz = track.values[2];
+  const ox = base ? base.x : 0, oy = base ? base.y : 0, oz = base ? base.z : 0;
   const out = track.clone();
   for (let i = 0; i < n; i++) {
-    out.values[i * 3] -= bx;
-    out.values[i * 3 + 1] -= by;
-    out.values[i * 3 + 2] -= bz;
+    out.values[i * 3] = ox + (out.values[i * 3] - bx);
+    out.values[i * 3 + 1] = oy + (out.values[i * 3 + 1] - by);
+    out.values[i * 3 + 2] = oz + (out.values[i * 3 + 2] - bz);
   }
   return out;
 }
 
-function processPositionTrack(track, scale, rootMotion, isRoot, positionMode) {
+function processPositionTrack(track, scale, rootMotion, isRoot, positionMode, base) {
   let t = track;
   if (scale !== 1) {
     t = t.clone();
     for (let i = 0; i < t.values.length; i++) t.values[i] *= scale;
   }
-  if (positionMode === 'relative') t = relativizePositionTrack(t);
+  if (positionMode === 'relative') t = relativizePositionTrack(t, base);
   if (isRoot && rootMotion !== 'full') {
     t = t.clone();
     const n = t.values.length / 3;
+    const ox = base ? base.x : 0, oy = base ? base.y : 0, oz = base ? base.z : 0;
     for (let i = 0; i < n; i++) {
       if (rootMotion === 'none') {
-        t.values[i * 3] = 0; t.values[i * 3 + 1] = 0; t.values[i * 3 + 2] = 0;
-      } else { // 'y': keep vertical bob, kill planar drift (game moves the group)
-        t.values[i * 3] = 0; t.values[i * 3 + 2] = 0;
+        t.values[i * 3] = ox; t.values[i * 3 + 1] = oy; t.values[i * 3 + 2] = oz;
+      } else { // 'y': keep vertical bob around base, kill planar drift (game moves the group)
+        t.values[i * 3] = ox; t.values[i * 3 + 2] = oz;
       }
     }
   }
@@ -258,7 +263,12 @@ export function retargetClip(clip, target, opts = {}) {
 
     let nt = track;
     if (parts.property === 'position') {
-      nt = processPositionTrack(track, posScale, rootMotion, rootCanons.has(canon), positionMode);
+      // Base-pose center: the node's local position at retarget time (bind
+      // pose for skinned rigs, pivot rest for virtual rigs). Position tracks
+      // are applied as absolute locals, so deltas re-center here.
+      const node = target.getObjectByName ? target.getObjectByName(targetName) : null;
+      const base = node ? node.position : null;
+      nt = processPositionTrack(track, posScale, rootMotion, rootCanons.has(canon), positionMode, base);
     } else {
       nt = track.clone();
     }
