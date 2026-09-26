@@ -25,7 +25,7 @@ import { initMainMenu } from './ui/mainMenu.js?v=5.0';
 import { initCharacterSelect } from './ui/characterSelect.js?v=5.0';
 import { initHUD } from './ui/hud.js?v=5.0';
 import { initScreens } from './ui/screens.js?v=5.0';
-import { initEscapeManager, registerEscapeLayer } from './ui/escapeManager.js';
+import { initEscapeManager, registerEscapeLayer, closeAllEscapeLayers } from './ui/escapeManager.js';
 import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
 // Track 3 UX: first-run tutorial overlay + boss-relic claim affordance.
 import { maybeShowFirstRunTutorial } from './ui/firstRunTutorial.mjs?v=5.1';
@@ -1143,6 +1143,18 @@ class GameApp {
       isOpen: () => this.hudDrawer.isOpen(),
       close: () => this.hudDrawer.close(),
     });
+    // [menu-layer-fix] The expanded right-rail minimap is a dismissible
+    // panel too: Escape closes it on desktop, and it never carries into a
+    // fight via closeAllEscapeLayers().
+    registerEscapeLayer({
+      id: 'minimap-expanded', priority: 80,
+      isOpen: () => { const el = elById('right-hud-body'); return !!el && !el.classList.contains('hidden'); },
+      close: () => {
+        elById('right-hud-body')?.classList.add('hidden');
+        const b = elById('btn-min-right-stack');
+        if (b) b.innerText = '🗺️ MAP [+]';
+      },
+    });
 
     // Click backdrop of Emporium Modal to close
     document.getElementById('emporium-modal')?.addEventListener('click', (e) => {
@@ -1743,6 +1755,19 @@ class GameApp {
     document.getElementById('room-lobby-screen').classList.add('hidden');
     document.getElementById('game-hud').classList.remove('hidden');
     document.body.classList.add('in-run'); // narrator banner drops below the boss/quest stack
+    // [menu-layer-fix] Never carry menus into the fight: dismiss every
+    // registered dismissible layer (modals, drawer, expanded minimap...).
+    // The first-run tutorial, HUD vitals, and damage numbers are untouched.
+    try { closeAllEscapeLayers(); } catch (e) { /* best effort */ }
+    // Collapse the expandable HUD groups so a 360px phone starts clean.
+    const collapseHudGroup = (targetId, btnId, collapsedLabel) => {
+      const target = document.getElementById(targetId);
+      if (target && !target.classList.contains('hidden')) target.classList.add('hidden');
+      const btn = document.getElementById(btnId);
+      if (btn && collapsedLabel) btn.innerText = collapsedLabel;
+    };
+    collapseHudGroup('tactical-buttons-group', 'btn-min-tactical', '⚔️ [+]');
+    collapseHudGroup('proc-floor-details', 'btn-min-proc-floor', '[+]');
     this.controls.setSkillInfo(CLASSES[this.selectedClass].abilities);
     this.audio.playSFX('powerup');
     // Track 3 UX: first-run tutorial overlay (once ever, skippable).
