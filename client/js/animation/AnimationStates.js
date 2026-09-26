@@ -360,7 +360,10 @@ export function createAnimator(object3D, opts = {}) {
       if (!map) return api;
       const entries = map instanceof Map ? map.entries() : Object.entries(map);
       for (const [state, clip] of entries) {
-        if (clip && clip.isAnimationClip) clips.set(state, clip);
+        // three r160's AnimationClip has no isAnimationClip flag (verified
+        // against the served vendor build) — duck-type instead, or every
+        // valid clip is silently dropped and the layer stays procedural.
+        if (clip && Array.isArray(clip.tracks) && typeof clip.duration === 'number') clips.set(state, clip);
       }
       return api;
     },
