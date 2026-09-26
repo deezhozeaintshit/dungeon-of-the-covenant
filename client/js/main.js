@@ -25,6 +25,7 @@ import { initMainMenu } from './ui/mainMenu.js?v=5.0';
 import { initCharacterSelect } from './ui/characterSelect.js?v=5.0';
 import { initHUD } from './ui/hud.js?v=5.0';
 import { initScreens } from './ui/screens.js?v=5.0';
+import { initEscapeManager, registerEscapeLayer } from './ui/escapeManager.js';
 import { initDamageNumbers } from './ui/damageNumbers.js?v=5.0';
 // Track 3 UX: first-run tutorial overlay + boss-relic claim affordance.
 import { maybeShowFirstRunTutorial } from './ui/firstRunTutorial.mjs?v=5.1';
@@ -374,6 +375,22 @@ class GameApp {
     this.skillTreePanel = initSkillTreePanel({
       onSpend: (abilityId) => { if (this.network) this.network.send({ type: 'skill_tree_spend', abilityId }); }
     });
+    // A level-up blessing that lands while the tutorial tooltip is up is
+    // deferred: the blessing overlay (z-index 9000) would otherwise cover
+    // SKIP TUTORIAL. It is shown the moment the tutorial ends.
+    this._pendingBlessing = null;
+    const flushPendingBlessing = () => {
+      if (!this._pendingBlessing || !this.levelUpModal) return;
+      const p = this._pendingBlessing;
+      this._pendingBlessing = null;
+      this.levelUpModal.show(p);
+      this.audio.playSFX('levelup');
+      this.narrator.say(`LEVEL ${p.level || 1}! Choose your covenant blessing!`, 'info');
+    };
+    if (this.tutorial && typeof this.tutorial.on === 'function') {
+      this.tutorial.on('onTutorialComplete', flushPendingBlessing);
+      this.tutorial.on('onTutorialSkip', flushPendingBlessing);
+    }
     bindRespawnButton({
       onRequest: () => { if (this.network) this.network.send({ type: 'respawn_request' }); }
     });
@@ -800,12 +817,6 @@ class GameApp {
     };
     document.getElementById('btn-lobby-emporium')?.addEventListener('click', openEmp);
     document.getElementById('btn-hud-emporium')?.addEventListener('click', openEmp);
-    // Phase 3 meta-progression: open the Covenant Vault (ranks + unlockables).
-    document.getElementById('btn-covenant-vault')?.addEventListener('click', (e) => {
-      e?.stopPropagation();
-      this.audio.playSFX('ui_select');
-      if (this.metaUI) this.metaUI.openVault();
-    });
     document.getElementById('btn-close-emporium')?.addEventListener('click', (e) => {
       e.stopPropagation();
       empModal?.classList.add('hidden');
@@ -1067,7 +1078,11 @@ class GameApp {
     };
     document.getElementById('btn-audio-toggle')?.addEventListener('click', toggleAudio);
 
-    // Keyboard Shortcuts: [H] Clean HUD Toggle, [M] Audio Toggle, [I] Inventory, [G] Minimap Toggle, [Escape] Close Any Open Popup/Drawer/Modal
+    // Keyboard Shortcuts: [H] Clean HUD Toggle, [M] Audio Toggle, [I] Inventory, [G] Minimap Toggle.
+    // Escape is NOT handled here anymore: the single capture-phase dispatcher
+    // in ui/escapeManager.js closes the topmost open layer (and only toggles
+    // pause when a run is active). Two window-level Escape handlers used to
+    // both fire on one press — the modal closed AND pause opened on top of it.
     window.addEventListener('keydown', (e) => {
       if (document.activeElement?.tagName === 'INPUT') return;
       if ((e.key === 'h' || e.key === 'H') && this.gameState === 'dungeon') {
@@ -1079,14 +1094,39 @@ class GameApp {
       } else if ((e.key === 'g' || e.key === 'G') && this.gameState === 'dungeon') {
         // Phase 3: toggle the fog-of-war minimap (workstream 4).
         if (this.minimap) this.minimap.toggle();
-      } else if (e.key === 'Escape') {
-        if (this.inventoryPanel && this.inventoryPanel.isOpen) this.inventoryPanel.hide();
-        document.getElementById('emporium-modal')?.classList.add('hidden');
-        document.getElementById('forge-panel')?.classList.add('hidden');
-        document.getElementById('secret-card-panel')?.classList.add('hidden');
-        document.getElementById('narrator-banner')?.classList.add('hidden');
-        document.getElementById('ping-wheel')?.classList.add('hidden');
       }
+    });
+
+    // Central Escape dispatcher: one press closes exactly the topmost layer.
+    // All isOpen/close closures are lazy — initLobbyEvents runs before some
+    // of these components are constructed.
+    initEscapeManager({ togglePause: () => this.ui.screens?.pause?.toggle() });
+    const elById = (id) => document.getElementById(id);
+    const hiddenClassLayer = (id, elId, priority = 80) => registerEscapeLayer({
+      id,
+      priority,
+      isOpen: () => { const el = elById(elId); return !!el && !el.classList.contains('hidden'); },
+      close: () => elById(elId)?.classList.add('hidden'),
+    });
+    registerEscapeLayer({
+      id: 'inventory', priority: 80,
+      isOpen: () => !!this.inventoryPanel?.isOpen,
+      close: () => this.inventoryPanel?.hide(),
+    });
+    hiddenClassLayer('emporium', 'emporium-modal');
+    hiddenClassLayer('forge', 'forge-panel');
+    hiddenClassLayer('secret-goal', 'secret-card-panel');
+    hiddenClassLayer('narrator', 'narrator-banner', 40);
+    hiddenClassLayer('ping-wheel', 'ping-wheel', 40);
+    registerEscapeLayer({
+      id: 'settings', priority: 85,
+      isOpen: () => !!this.ui.menu?.settings?.isOpen,
+      close: () => this.ui.menu?.settings?.close(),
+    });
+    if (this.hudDrawer) registerEscapeLayer({
+      id: 'drawer', priority: 85,
+      isOpen: () => this.hudDrawer.isOpen(),
+      close: () => this.hudDrawer.close(),
     });
 
     // Click backdrop of Emporium Modal to close
@@ -1557,6 +1597,12 @@ class GameApp {
       // Phase 2: progression — level-up blessing choices (local player only).
       level_up_choices: (msg) => {
         if (msg.playerId && msg.playerId !== this.localPlayerId) return;
+        if (this.tutorial && this.tutorial.active) {
+          // Tutorial is showing: defer so the blessing overlay (z 9000)
+          // can't cover SKIP TUTORIAL. Flushed on tutorial end.
+          this._pendingBlessing = { level: msg.level || 1, choices: msg.choices || [] };
+          return;
+        }
         if (this.levelUpModal) this.levelUpModal.show({ level: msg.level || 1, choices: msg.choices || [] });
         this.audio.playSFX('levelup');
         this.narrator.say(`LEVEL ${msg.level || 1}! Choose your covenant blessing!`, 'info');
@@ -1681,6 +1727,7 @@ class GameApp {
     this.gameState = 'dungeon';
     document.getElementById('room-lobby-screen').classList.add('hidden');
     document.getElementById('game-hud').classList.remove('hidden');
+    document.body.classList.add('in-run'); // narrator banner drops below the boss/quest stack
     this.controls.setSkillInfo(CLASSES[this.selectedClass].abilities);
     this.audio.playSFX('powerup');
     // Track 3 UX: first-run tutorial overlay (once ever, skippable).
@@ -1904,6 +1951,7 @@ class GameApp {
   showVictoryPodium(summary) {
     this.gameState = 'victory';
     document.getElementById('game-hud').classList.add('hidden');
+    document.body.classList.remove('in-run');
     document.getElementById('victory-screen').classList.remove('hidden');
 
     document.getElementById('final-party-score').innerText = summary.score.toLocaleString();

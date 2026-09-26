@@ -1,4 +1,9 @@
 // TutorialSystem.js - Interactive Tutorial & Onboarding System
+//
+// Escape handling: the tooltip registers as the TOP-priority layer (100) in
+// the central ui/escapeManager.js dispatcher, so one Escape press skips the
+// tutorial and never double-fires into pause. The Tab focus trap stays here.
+import { registerEscapeLayer } from './ui/escapeManager.js';
 
 export class TutorialSystem {
   constructor(gameApp) {
@@ -8,6 +13,7 @@ export class TutorialSystem {
     this.steps = [];
     this._lastFocused = null;    // element focused before the tooltip opened
     this._lastKeyHandler = null; // { tooltip, onKeyDown } for cleanup
+    this._escRegistered = false; // central Escape dispatcher layer (priority 100)
     this.listeners = {
       onTutorialStart: [],
       onTutorialStep: [],
@@ -25,6 +31,17 @@ export class TutorialSystem {
   start() {
     if (!this.active && this.steps.length > 0) {
       this.active = true;
+      // Register once with the central Escape dispatcher: while the tutorial
+      // tooltip is up, Escape skips the tutorial (top priority, so it can
+      // never double-fire into pause or a modal beneath it).
+      if (!this._escRegistered) {
+        this._escRegistered = true;
+        registerEscapeLayer({
+          id: 'tutorial', priority: 100,
+          isOpen: () => this.active && !!document.querySelector('.tutorial-tooltip'),
+          close: () => this.skip(),
+        });
+      }
       this.currentStep = 0;
       this.showStep();
       this.notifyListeners('onTutorialStart');
@@ -123,13 +140,10 @@ export class TutorialSystem {
     nextBtn.addEventListener('click', () => this.next());
     skipBtn.addEventListener('click', () => this.skip());
 
-    // Esc skips; Tab cycles between the two buttons (focus trap).
+    // Escape is owned by the central dispatcher (ui/escapeManager.js), where
+    // the tutorial registers as the top-priority layer (close = skip).
+    // Tab cycles between the two buttons (focus trap).
     const onKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        this.skip();
-        return;
-      }
       if (e.key === 'Tab') {
         const focusables = [nextBtn, skipBtn];
         const first = focusables[0];

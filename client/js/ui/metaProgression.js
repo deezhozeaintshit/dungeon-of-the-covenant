@@ -20,10 +20,26 @@
 // contrast on the covenant dark background.
 
 import { COVENANT_THEME } from './theme.js';
+import { registerEscapeLayer } from './escapeManager.js';
 
 const T = COVENANT_THEME;
 
-const css = (el, styles) => Object.assign(el.style, styles);
+// css(): routes each key to the right place — className/id become real
+// attributes (Object.assign(el.style, styles) would silently swallow them as
+// CSSStyleDeclaration expandos), role/aria-*/data-* become attributes, and
+// everything else is applied as inline style.
+const css = (el, styles = {}) => {
+  for (const [k, v] of Object.entries(styles)) {
+    if (v == null) continue;
+    if (k === 'className') { el.className = String(v); continue; }
+    if (k === 'id') { el.id = String(v); continue; }
+    if (k === 'role' || k.startsWith('aria-') || k.startsWith('data-')) {
+      el.setAttribute(k, String(v));
+      continue;
+    }
+    try { el.style[k] = v; } catch (err) { /* unknown CSS prop: ignore */ }
+  }
+};
 const mk = (tag, html = '', styles = {}) => {
   const n = document.createElement(tag);
   if (html) n.innerHTML = html;
@@ -65,6 +81,7 @@ export function initMetaProgression({
   injectStyles();
   let state = null;          // { meta, catalog } from /api/meta/state
   let overlay = null;
+  let unregisterEscape = null;
   let activeTab = 'classes';
   let lastFocus = null;
   let liveRegion = null;
@@ -167,6 +184,7 @@ export function initMetaProgression({
   }
 
   function closeVault() {
+    if (typeof unregisterEscape === 'function') { unregisterEscape(); unregisterEscape = null; }
     if (overlay) { overlay.remove(); overlay = null; }
     if (lastFocus && typeof lastFocus.focus === 'function') {
       try { lastFocus.focus(); } catch (e) {}
@@ -182,7 +200,7 @@ export function initMetaProgression({
   }
 
   function trapTab(e) {
-    if (e.key === 'Escape') { e.preventDefault(); closeVault(); return; }
+    // Escape is owned by the central dispatcher (ui/escapeManager.js).
     if (e.key !== 'Tab') return;
     const f = focusables();
     if (!f.length) return;
@@ -458,6 +476,12 @@ export function initMetaProgression({
     overlay.appendChild(panel);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) closeVault(); });
     document.body.appendChild(overlay);
+    // Escape is owned by the central dispatcher (ui/escapeManager.js).
+    unregisterEscape = registerEscapeLayer({
+      id: 'vault', priority: 80,
+      isOpen: () => !!overlay && !!overlay.parentElement,
+      close: () => closeVault(),
+    });
     selectTab(activeTab);
     refresh().then(() => {
       const subEl = titleBox.querySelector('div:last-child');

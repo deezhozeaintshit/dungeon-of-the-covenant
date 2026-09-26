@@ -20,6 +20,7 @@
 // the covenant dark background.
 
 import { COVENANT_THEME } from './theme.js';
+import { registerEscapeLayer } from './escapeManager.js';
 
 const T = COVENANT_THEME;
 
@@ -197,6 +198,16 @@ export function initCovenUI({
   function open() {
     if (overlay) { overlay.style.display = 'flex'; lastFocus = document.activeElement; trapFocus(); render(); return; }
     lastFocus = document.activeElement;
+    // Escape is owned by the central dispatcher (escapeManager.js); the
+    // coven overlay registers as a layer (registered once, isOpen is lazy).
+    if (!open._escRegistered) {
+      open._escRegistered = true;
+      registerEscapeLayer({
+        id: 'coven', priority: 80,
+        isOpen: () => !!overlay && overlay.style.display === 'flex',
+        close: () => close(),
+      });
+    }
     overlay = el('div', 'coven-overlay');
     const dialog = el('div', 'coven-dialog');
     dialog.setAttribute('role', 'dialog');
@@ -242,7 +253,7 @@ export function initCovenUI({
   }
 
   function onKeydown(e) {
-    if (e.key === 'Escape') { close(); return; }
+    // Escape is owned by the central dispatcher (ui/escapeManager.js).
     if (e.key === 'Tab') {
       const dialog = overlay.querySelector('.coven-dialog');
       const items = [...dialog.querySelectorAll('button:not(:disabled), input, [tabindex="0"]')].filter(x => x.offsetParent !== null);

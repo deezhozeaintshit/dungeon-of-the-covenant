@@ -264,12 +264,9 @@ export class HudDrawerManager {
 
   _handleKeyDown(e) {
     if (!this.opened || !e) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopPropagation();
-      this.close();
-      return;
-    }
+    // Escape is owned by the central dispatcher (ui/escapeManager.js): the
+    // drawer registers itself as a layer in main.js. Only the Tab focus
+    // trap stays here.
     if (e.key !== 'Tab') return;
     // Simple focus trap while the drawer is open.
     const items = this._focusables();

@@ -252,8 +252,7 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 /* ---------- narrator banner ---------- */
 #narrator-banner {
   position: fixed;
-  top: calc(10px + var(--safe-t));
-  left: 50%;
+  top: calc(10px + var(--safe-t));  left: 50%;
   transform: translateX(-50%);
   z-index: 200;
   display: flex;
@@ -266,6 +265,9 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
   border-radius: 10px;
   box-shadow: var(--shadow);
 }
+/* The narrator banner is body-level (the lobby uses it too); while a run is
+   active it drops below the boss-bar/quest stack so it never covers them. */
+body.in-run #narrator-banner { top: calc(196px + var(--safe-t)); }
 .narrator-ornament { width: 2px; align-self: stretch; background: linear-gradient(180deg, transparent, var(--gold), transparent); }
 .narrator-content { display: flex; align-items: center; gap: 10px; flex: 1; }
 .narrator-title { font-family: var(--font-display); font-size: 0.62rem; letter-spacing: 0.22em; color: var(--gold); }
@@ -778,11 +780,34 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 @keyframes feed-in { from { transform: translateX(-14px); opacity: 0; } }
 
 /* ---------- quest banner ---------- */
-#hud-quest-banner {
+/* ---------- HUD center stack: boss bar + quest banner each get their own
+   unobstructed row (previously the boss bar flex-wrapped over the top bar
+   and the quest/narrator banners stacked over the boss-bar area) ---------- */
+#hud-center-stack {
   position: absolute;
-  top: calc(64px + var(--safe-t));
+  top: calc(8px + var(--safe-t));
   left: 50%;
   transform: translateX(-50%);
+  z-index: 41;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  width: min(600px, 94vw);
+  pointer-events: none;
+}
+#hud-center-stack > * { pointer-events: auto; width: 100%; }
+#hud-center-stack .boss-hud {
+  flex: none; /* was flex: 1 1 320px as a top-bar row item — that forced wraps */
+  max-width: none;
+}
+#hud-center-stack #hud-quest-banner {
+  position: static;
+  top: auto; left: auto;
+  transform: none;
+  max-width: none;
+}
+#hud-quest-banner {
   z-index: 42;
   display: flex; align-items: center; gap: 8px;
   background: var(--panel);
@@ -853,6 +878,33 @@ h1, h2, h3, h4 { font-family: var(--font-display); letter-spacing: 0.06em; }
 /* ==========================================================================
    MINIMAP / CAMERA / FLOOR STACK, VITALS, TOASTS, TACTICAL BAR
    ========================================================================== */
+/* ---------- right rail: forge card, secret-goal card, and the minimap /
+   camera stack share ONE vertical rail, so an open card can never cover
+   the minimap (previously both were absolutely positioned over it) ---------- */
+#right-rail {
+  position: absolute;
+  top: calc(112px + var(--safe-t));
+  right: calc(10px + var(--safe-r));
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: max-content;
+  max-width: 94vw;
+  pointer-events: none;
+}
+#right-rail > * { pointer-events: auto; }
+#right-rail .minimap-camera-panel {
+  position: static;
+  top: auto; right: auto;
+}
+#right-rail .secret-card {
+  position: static;
+  top: auto; right: auto;
+  width: 310px;
+  max-width: 86vw;
+}
 .minimap-camera-panel {
   position: absolute;
   top: calc(112px + var(--safe-t));
@@ -1313,6 +1365,7 @@ body.touch-active {
   z-index: 250;
 }
 .pause-card, .death-card {
+  position: relative; /* anchors the ✕ close button on the pause card */
   width: min(440px, 92vw);
   text-align: center;
   background: linear-gradient(180deg, rgba(28, 19, 44, 0.97), rgba(12, 8, 22, 0.97));
@@ -1323,6 +1376,20 @@ body.touch-active {
   animation: card-in 0.25s ease;
 }
 .death-card { border-color: var(--blood-hi); box-shadow: var(--shadow), 0 0 44px rgba(185, 28, 28, 0.35); }
+/* ✕ close button on the pause card (resumes the game, same as RESUME). */
+.pause-close {
+  position: absolute;
+  top: 10px; right: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  color: var(--gold-hi);
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  min-width: 36px; min-height: 36px;
+  font-size: 1rem; font-weight: 900;
+  cursor: pointer;
+}
+.pause-close:hover { color: #fff; border-color: var(--gold-hi); }
+.pause-close:focus-visible { outline: 3px solid var(--gold-hi); outline-offset: 2px; }
 .pause-title, .death-title {
   font-size: clamp(1.6rem, 6vw, 2.2rem);
   font-weight: 900;
@@ -1485,7 +1552,7 @@ body.touch-active {
 
 /* tutorial tooltip (built dynamically by tutorialsystem.js) */
 .tutorial-tooltip {
-  position: fixed; z-index: 360;
+  position: fixed; z-index: 9600; /* above every modal overlay (blessing: 9000) so SKIP TUTORIAL is always clickable */
   max-width: min(340px, 88vw);
   background: linear-gradient(180deg, rgba(30, 20, 50, 0.98), rgba(14, 9, 26, 0.98));
   border: 1.5px solid var(--gold);
@@ -1517,9 +1584,11 @@ body.touch-active {
   #gamepad-hud-badge { display: none; }
   #party-hud-wrapper { max-width: 44vw; }
   .party-portrait-hud { min-width: 0; }
-  .boss-hud { flex-basis: 100%; order: 3; }
-  #hud-quest-banner { top: calc(150px + var(--safe-t)); font-size: 0.64rem; }
-  .minimap-camera-panel { top: calc(210px + var(--safe-t)); }
+  /* boss bar / quest banner now live in #hud-center-stack (own rows) — no
+     flex-row wrapping games needed. */
+  #hud-center-stack { width: 96vw; }
+  #hud-quest-banner { font-size: 0.64rem; }
+  #right-rail { top: calc(210px + var(--safe-t)); }
   #dungeon-minimap { width: 104px; height: 104px; }
   #procedural-floor-panel { width: 132px; }
   .player-vitals { width: 52vw; bottom: calc(170px + var(--safe-b)); }
@@ -1531,7 +1600,7 @@ body.touch-active {
   .abilities-zone { transform: scale(0.86); transform-origin: bottom right; bottom: calc(76px + var(--safe-b)); }
   #joystick-zone { width: 46vw; height: 48vh; }
   .kill-feed { top: calc(210px + var(--safe-t)); max-width: 44vw; }
-  .secret-card { right: calc(8px + var(--safe-r)); top: calc(240px + var(--safe-t)); width: 280px; }
+  #right-rail .secret-card { width: 280px; max-width: 88vw; }
   .event-toasts { bottom: calc(120px + var(--safe-b)); }
   .class-grid { grid-template-columns: repeat(3, 1fr); }
   .class-btn { min-height: 88px; }
@@ -1540,7 +1609,7 @@ body.touch-active {
 /* tablets / small landscape */
 @media (min-width: 481px) and (max-width: 900px) {
   .class-grid { grid-template-columns: repeat(3, 1fr); }
-  .boss-hud { flex-basis: 46%; }
+  /* boss bar lives in #hud-center-stack now (no flex-basis games) */
 }
 
 /* desktop */
@@ -1561,7 +1630,7 @@ body.touch-active {
 /* landscape phones — compress vertical HUD */
 @media (max-height: 500px) and (orientation: landscape) {
   #hud-quest-banner { display: none; }
-  .minimap-camera-panel { top: calc(64px + var(--safe-t)); }
+  #right-rail { top: calc(64px + var(--safe-t)); }
   #dungeon-minimap { width: 92px; height: 92px; }
   #procedural-floor-panel { display: none; }
   .player-vitals { bottom: calc(8px + var(--safe-b)); width: 38vw; }

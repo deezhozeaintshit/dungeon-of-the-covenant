@@ -14,6 +14,7 @@
 import {
   CLIP_WINDOW_MS, SHARE_HOOKS, buildShareText, checkCaptureSupport,
 } from './clipRecorder.js?v=4.0';
+import { registerEscapeLayer } from './ui/escapeManager.js';
 
 const CLIP_SECONDS = Math.round(CLIP_WINDOW_MS / 1000);
 
@@ -57,19 +58,27 @@ export function initClipButton({
   let lastFocus = null;
   let currentObjectUrl = null;
   let discardArmed = false;
+  let unregisterEscape = null;
+
+  // Escape is owned by the single capture-phase dispatcher
+  // (ui/escapeManager.js); register the open modal as a layer.
+  const armEscapeLayer = () => {
+    if (unregisterEscape) unregisterEscape();
+    unregisterEscape = registerEscapeLayer({
+      id: 'clip', priority: 80,
+      isOpen: () => !!modal && !!modal.parentElement,
+      close: () => closeModal(),
+    });
+  };
 
   const closeModal = ({ keepFocus = false } = {}) => {
+    if (unregisterEscape) { unregisterEscape(); unregisterEscape = null; }
     if (!modal) return;
     modal.remove();
     modal = null;
     if (currentObjectUrl) { URL.revokeObjectURL(currentObjectUrl); currentObjectUrl = null; }
     discardArmed = false;
-    document.removeEventListener('keydown', onModalKey, true);
     if (!keepFocus && lastFocus && typeof lastFocus.focus === 'function') lastFocus.focus();
-  };
-
-  const onModalKey = (e) => {
-    if (e.key === 'Escape') { e.stopPropagation(); closeModal(); }
   };
 
   const copyShareText = async (hook) => {
@@ -169,7 +178,7 @@ export function initClipButton({
     modal.appendChild(panel);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
     document.body.appendChild(modal);
-    document.addEventListener('keydown', onModalKey, true);
+    armEscapeLayer();
     video.play().catch(() => { /* user can press play */ });
     btnDownload.focus();
   };
@@ -192,7 +201,7 @@ export function initClipButton({
     modal.appendChild(panel);
     modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
     document.body.appendChild(modal);
-    document.addEventListener('keydown', onModalKey, true);
+    armEscapeLayer();
     btnClose.focus();
   };
 

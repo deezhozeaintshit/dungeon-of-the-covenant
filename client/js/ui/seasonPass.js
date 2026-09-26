@@ -23,10 +23,27 @@
 // meets 4.5:1 contrast on the covenant dark background.
 
 import { COVENANT_THEME } from './theme.js';
+import { registerEscapeLayer } from './escapeManager.js';
 
 const T = COVENANT_THEME;
 
-const css = (el, styles) => Object.assign(el.style, styles);
+// css(): routes each key to the right place. className/id become real
+// attributes (the old Object.assign(el.style, styles) silently swallowed them
+// as CSSStyleDeclaration expandos, so the Season Pass overlay/dialog never
+// received their classes and the dialog never rendered visibly), role/aria-*
+// /data-* become attributes, and everything else is applied as inline style.
+const css = (el, styles = {}) => {
+  for (const [k, v] of Object.entries(styles)) {
+    if (v == null) continue;
+    if (k === 'className') { el.className = String(v); continue; }
+    if (k === 'id') { el.id = String(v); continue; }
+    if (k === 'role' || k.startsWith('aria-') || k.startsWith('data-')) {
+      el.setAttribute(k, String(v));
+      continue;
+    }
+    try { el.style[k] = v; } catch (err) { /* unknown CSS prop: ignore */ }
+  }
+};
 const mk = (tag, html = '', styles = {}) => {
   const n = document.createElement(tag);
   if (html) n.innerHTML = html;
@@ -136,6 +153,7 @@ export function initSeasonPass({
   let boards = null;       // /api/leaderboards
   let overlay = null;
   let activeTab = 'pass';
+  let unregisterEscape = null;
   let activeBoard = 'daily_delve_speed';
   let lastFocus = null;
   let liveRegion = null;
@@ -370,9 +388,14 @@ export function initSeasonPass({
     renderBody(dialog);
 
     overlay.addEventListener('keydown', trapFocus);
-    overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    // Escape is owned by the central dispatcher (ui/escapeManager.js).
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
     document.body.appendChild(overlay);
+    unregisterEscape = registerEscapeLayer({
+      id: 'season-pass', priority: 80,
+      isOpen: () => !!overlay && !!overlay.parentElement,
+      close: () => close(),
+    });
     closeBtn.focus();
   }
 
@@ -385,6 +408,7 @@ export function initSeasonPass({
   }
 
   function close() {
+    if (typeof unregisterEscape === 'function') { unregisterEscape(); unregisterEscape = null; }
     if (overlay && overlay.parentElement) overlay.parentElement.removeChild(overlay);
     overlay = null;
     if (lastFocus && lastFocus.focus) { try { lastFocus.focus(); } catch (e) { /* ignore */ } }

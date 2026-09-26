@@ -6,8 +6,11 @@
 // server; the client only renders state and sends { tier, payment }.
 //
 // WCAG 2.1 AA: real <button>s, role=dialog with aria-modal, labelled
-// controls, Esc to close, visible focus states (see css/rift.css), and
+// controls, Esc to close (via the central ui/escapeManager.js dispatcher),
+// visible focus states (see css/rift.css), and
 // text contrast >= 4.5:1 on the dark-fantasy palette.
+
+import { registerEscapeLayer } from './escapeManager.js';
 
 const AFFIX_CATALOG = {
   molten:     { icon: '🌋', name: 'Molten',     desc: 'Burning ground erupts beneath the party.' },
@@ -85,8 +88,9 @@ export function initRiftUI({ network, getAuthToken, getPlayerName, getChosenClas
     lockedEl = $('rift-locked'), bodyEl = $('rift-body');
 
   function refreshKeystones() {
-    const k = state.status ? state.status.keystones : 0;
-    keystonesEl.innerHTML = `🗝️ <strong>${k}</strong> keystone${k === 1 ? '' : 's'} &nbsp;•&nbsp; 🏆 best tier <strong>${state.status ? state.status.bestTier : 0}</strong>`;
+    const k = state.status?.keystones ?? 0;
+    const best = state.status?.bestTier ?? '—';
+    keystonesEl.innerHTML = `🗝️ <strong>${k}</strong> keystone${k === 1 ? '' : 's'} &nbsp;•&nbsp; 🏆 best tier <strong>${best}</strong>`;
   }
 
   function renderTiers() {
@@ -183,8 +187,11 @@ export function initRiftUI({ network, getAuthToken, getPlayerName, getChosenClas
 
   $('rift-close').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !overlay.classList.contains('hidden')) close();
+  // Escape is owned by the central dispatcher (ui/escapeManager.js).
+  registerEscapeLayer({
+    id: 'rift', priority: 80,
+    isOpen: () => !overlay.classList.contains('hidden'),
+    close: () => close(),
   });
   overlay.querySelectorAll('input[name="rift-pay"]').forEach(r => {
     r.addEventListener('change', () => { state.payment = r.value; });

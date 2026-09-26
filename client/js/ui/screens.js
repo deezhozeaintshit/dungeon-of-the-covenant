@@ -1,6 +1,9 @@
 // ui/screens.js — full-screen flows: loading, pause menu, death/respawn.
 // All actions are callback-driven (no game logic inlined); the coordinator
 // supplies onRespawn / onQuitToLobby / onOpenSettings.
+// Escape handling lives in ./escapeManager.js (single capture-phase
+// dispatcher); the pause screen registers itself as a layer there.
+import { registerEscapeLayer, isRunActive } from './escapeManager.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -75,6 +78,8 @@ export function initPauseScreen({ onOpenSettings, onQuitToLobby } = {}) {
   };
 
   $('btn-resume')?.addEventListener('click', () => api.hide());
+  // ✕ close button on the pause card (same action as RESUME).
+  $('btn-pause-close')?.addEventListener('click', () => api.hide());
   $('btn-pause-settings')?.addEventListener('click', () => {
     api.hide();
     if (typeof onOpenSettings === 'function') onOpenSettings();
@@ -85,20 +90,27 @@ export function initPauseScreen({ onOpenSettings, onQuitToLobby } = {}) {
   });
   $('btn-pause-open')?.addEventListener('click', () => api.show());
 
-  // Escape toggles pause only when no modal/drawer is already open
-  // (main.js owns Escape-to-close for popups; this runs alongside it).
+  // Track 3 UX (WCAG 2.1 AA): the pause screen is a modal dialog — role="dialog",
+  // aria-modal, and focus returns to the element that opened it. Escape is
+  // owned by the single capture-phase dispatcher in escapeManager.js: it closes the topmost open layer, and only toggles
+  // pause (via the dispatcher fallthrough) when a run is active. The 'p'
+  // shortcut below is likewise guarded so it never pauses from the lobby.
   window.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' && e.key !== 'p' && e.key !== 'P') return;
-    if (e.key === 'Escape') {
-      const popupOpen =
-        document.querySelector('.modal-overlay:not(.hidden)') ||
-        document.querySelector('.secret-card:not(.hidden)') ||
-        document.querySelector('#settings-panel:not(.hidden)');
-      if (popupOpen) return;
-    }
+    if (e.key !== 'p' && e.key !== 'P') return;
     const target = e.target;
     if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+    if (!isRunActive()) return; // lobby guard: pause is a run-only state
     api.toggle();
+  });
+
+  // Pause registers with the central Escape dispatcher (priority 70): Escape
+  // closes the pause screen when it is the topmost open layer. When nothing
+  // is open, the dispatcher's fallthrough toggles pause instead.
+  registerEscapeLayer({
+    id: 'pause',
+    priority: 70,
+    isOpen: () => api.isOpen,
+    close: () => api.hide(),
   });
 
   return api;

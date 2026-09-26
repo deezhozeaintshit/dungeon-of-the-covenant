@@ -133,9 +133,6 @@
           <button id="btn-lobby-emporium" class="btn btn-secondary">
             💎 COVENANT EMPORIUM &amp; STRIPE ARMORY
           </button>
-          <button id="btn-covenant-vault" class="btn btn-secondary" aria-label="Open the Covenant Vault: account ranks and unlockables">
-            📜 COVENANT VAULT — RANKS &amp; UNLOCKS
-          </button>
           <!-- Phase 4 (workstream 4): Endless Rift gate -->
           <button id="btn-rift-gate" class="btn btn-secondary" aria-label="Open the Endless Rift gate: post-campaign scaling dungeons">
             🌀 RIFT GATE — ENDLESS RIFT
@@ -144,9 +141,6 @@
           <button id="btn-coven" class="btn btn-secondary" aria-label="Open the coven panel: your fellowship, its ranks, the weekly rite war, and coven whispers">
             🕯️ COVEN — FELLOWSHIP &amp; RITE WAR
           </button>
-          <a href="/promo.html" target="_blank" rel="noopener" class="btn btn-secondary promo-link">
-            🎬 WATCH OFFICIAL AAA PROMO TRAILER
-          </a>
           <a href="/docs" target="_blank" rel="noopener" class="btn btn-secondary">
             📖 READ THE GAME GUIDE
           </a>
@@ -224,17 +218,6 @@
         </div>
       </div>
 
-      <div id="boss-hud-bar" class="boss-hud hidden">
-        <button id="btn-min-boss" class="boss-min-btn" title="Minimize Boss Bar">−</button>
-        <div class="boss-info">
-          <span id="boss-name" class="boss-name">Malakor, Soul-Forge Warden</span>
-          <span id="boss-phase-tag" class="phase-tag">PHASE 1</span>
-        </div>
-        <div class="boss-hp-track" id="boss-hp-track-container">
-          <div id="boss-hp-fill" class="boss-hp-fill"></div>
-          <span id="boss-hp-text" class="boss-hp-text">100%</span>
-        </div>
-      </div>
 
       <button id="btn-war-horn" class="war-horn-btn" title="War Horn (Freeze Time for 10s)">
         <div class="horn-icon">📯</div>
@@ -298,16 +281,36 @@
       </div>
     </div>
 
-    <!-- Kill feed -->
-    <div id="kill-feed" class="kill-feed" aria-live="polite" aria-label="Kill feed"></div>
+    <!-- Center stack: boss bar + quest banner each get their own row so
+         they can never wrap over the top bar or over each other. -->
+    <div id="hud-center-stack">
+      <div id="boss-hud-bar" class="boss-hud hidden">
+        <button id="btn-min-boss" class="boss-min-btn" title="Minimize Boss Bar">−</button>
+        <div class="boss-info">
+          <span id="boss-name" class="boss-name">Malakor, Soul-Forge Warden</span>
+          <span id="boss-phase-tag" class="phase-tag">PHASE 1</span>
+        </div>
+        <div class="boss-hp-track" id="boss-hp-track-container">
+          <div id="boss-hp-fill" class="boss-hp-fill"></div>
+          <span id="boss-hp-text" class="boss-hp-text">100%</span>
+        </div>
+      </div>
 
     <!-- Quest banner -->
-    <div id="hud-quest-banner">
+      <div id="hud-quest-banner">
       <span>🎯</span>
       <span id="hud-quest-text">QUEST: Slay West &amp; East Wing Wardens to Shatter Malakor's Soul-Seals (0/2)</span>
       <button id="btn-min-quest" title="Minimize / Hide Quest Banner">−</button>
+      </div>
     </div>
 
+    <!-- Kill feed -->
+    <div id="kill-feed" class="kill-feed" aria-live="polite" aria-label="Kill feed"></div>
+
+
+    <!-- Right rail: forge card, secret-goal card, and minimap stack share
+         one vertical rail so the cards can never cover the minimap. -->
+    <div id="right-rail">
     <!-- Forge drawer -->
     <div id="forge-panel" class="secret-card hidden">
       <div class="secret-card-inner">
@@ -382,6 +385,7 @@
           </div>
         </div>
       </div>
+    </div>
     </div>
 
     <!-- Player vitals + buffs (bottom-left) -->
@@ -546,6 +550,7 @@
   <!-- ============ PAUSE MENU ============ -->
   <div id="pause-screen" class="ui-screen hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
     <div class="pause-card">
+      <button id="btn-pause-close" class="pause-close" aria-label="Close pause menu and resume the game">✕</button>
       <h2 id="pause-title" class="pause-title">PAUSED</h2>
       <div class="ornament-divider slim" aria-hidden="true"><span class="orn-line"></span><span class="orn-diamond"></span><span class="orn-line"></span></div>
       <p id="pause-subtitle" class="pause-sub">The dungeon holds its breath… (allies fight on)</p>
