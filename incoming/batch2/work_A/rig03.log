@@ -1,0 +1,140 @@
+[rig] targets: tris=15000 height=1.4
+01:28:07 | INFO: Data are loaded, start creating Blender stuff
+01:28:07 | INFO: Blender create Mesh node textured_mesh.obj
+01:28:07 | INFO: glTF import finished in 0.21s
+[rig] floor peel: removed 7609 faces below z=-0.3397 (spike 8683 verts)
+Info: Removed 2987 vertices
+Info: Removed: 3778 vertices, 11381 edges, 0 faces
+[rig] dropped 0 debris faces (islands<60 faces, biggest=12317)
+[rig] cleaned: 6169 verts
+[rig] raw height 0.772 m -> 1.4 m (scale 1.8123)
+[rig] tris before decimate: 12317
+[rig] analyzing joints, H=1.400
+[rig] leg peaks detected -> symmetric x=+-0.138
+[rig] shoulder x=+-0.140 (surf 0.188)
+[rig] joint Hips           (+0.000, +0.181, +0.742)
+[rig] joint Spine          (+0.000, +0.209, +0.840)
+[rig] joint Spine1         (+0.000, +0.163, +0.952)
+[rig] joint Spine2         (+0.000, +0.124, +1.064)
+[rig] joint Neck           (+0.000, +0.131, +1.190)
+[rig] joint Head           (+0.000, +0.095, +1.295)
+[rig] joint LeftShoulder   (+0.063, +0.181, +1.134)
+[rig] joint LeftArm        (+0.140, +0.166, +1.120)
+[rig] joint LeftForeArm    (+0.186, +0.076, +0.857)
+[rig] joint LeftHand       (+0.241, -0.033, +0.536)
+[rig] joint LeftUpLeg      (+0.138, +0.252, +0.700)
+[rig] joint LeftLeg        (+0.138, +0.152, +0.378)
+[rig] joint LeftFoot       (+0.138, +0.209, +0.105)
+[rig] joint LeftToeBase    (+0.138, +0.069, +0.042)
+[rig] joint RightShoulder  (-0.063, +0.181, +1.134)
+[rig] joint RightArm       (-0.140, +0.195, +1.120)
+[rig] joint RightForeArm   (-0.186, +0.086, +0.855)
+[rig] joint RightHand      (-0.243, -0.047, +0.532)
+[rig] joint RightUpLeg     (-0.138, +0.240, +0.700)
+[rig] joint RightLeg       (-0.138, +0.181, +0.378)
+[rig] joint RightFoot      (-0.138, +0.209, +0.105)
+[rig] joint RightToeBase   (-0.138, +0.069, +0.042)
+[rig] bone Hips           head=(+0.000,+0.181,+0.742) len=0.161
+[rig] bone Spine          head=(+0.000,+0.209,+0.840) len=0.121
+[rig] bone Spine1         head=(+0.000,+0.163,+0.952) len=0.119
+[rig] bone Spine2         head=(+0.000,+0.124,+1.064) len=0.126
+[rig] bone Neck           head=(+0.000,+0.131,+1.190) len=0.111
+[rig] bone Head           head=(+0.000,+0.095,+1.295) len=0.160
+[rig] bone LeftShoulder   head=(+0.063,+0.181,+1.134) len=0.080
+[rig] bone LeftArm        head=(+0.140,+0.166,+1.120) len=0.282
+[rig] bone LeftForeArm    head=(+0.186,+0.076,+0.857) len=0.344
+[rig] bone LeftHand       head=(+0.241,-0.033,+0.536) len=0.130
+[rig] bone RightShoulder  head=(-0.063,+0.181,+1.134) len=0.080
+[rig] bone RightArm       head=(-0.140,+0.195,+1.120) len=0.290
+[rig] bone RightForeArm   head=(-0.186,+0.086,+0.855) len=0.354
+[rig] bone RightHand      head=(-0.243,-0.047,+0.532) len=0.130
+[rig] bone LeftUpLeg      head=(+0.138,+0.252,+0.700) len=0.337
+[rig] bone LeftLeg        head=(+0.138,+0.152,+0.378) len=0.279
+[rig] bone LeftFoot       head=(+0.138,+0.209,+0.105) len=0.154
+[rig] bone LeftToeBase    head=(+0.138,+0.069,+0.042) len=0.070
+[rig] bone RightUpLeg     head=(-0.138,+0.240,+0.700) len=0.327
+[rig] bone RightLeg       head=(-0.138,+0.181,+0.378) len=0.274
+[rig] bone RightFoot      head=(-0.138,+0.209,+0.105) len=0.154
+[rig] bone RightToeBase   head=(-0.138,+0.069,+0.042) len=0.070
+[rig] auto-skin: unweighted verts: 0/6169
+[rig] vertex groups: 22
+Blender 4.2.3 LTS (hash 0e22e4fcea03 built 2024-10-14 23:31:34)
+Fra:1 Mem:18.17M (Peak 18.17M) | Time:00:00.00 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Hips
+Fra:1 Mem:18.24M (Peak 18.24M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Spine
+Fra:1 Mem:18.30M (Peak 18.30M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Spine1
+Fra:1 Mem:18.37M (Peak 18.37M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Spine2
+Fra:1 Mem:18.44M (Peak 18.44M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Neck
+Fra:1 Mem:19.36M (Peak 19.36M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Head
+Fra:1 Mem:19.42M (Peak 19.42M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftShoulder
+Fra:1 Mem:19.49M (Peak 19.49M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftArm
+Fra:1 Mem:19.56M (Peak 19.56M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftForeArm
+Fra:1 Mem:19.67M (Peak 19.67M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftHand
+Fra:1 Mem:19.73M (Peak 19.73M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftUpLeg
+Fra:1 Mem:19.80M (Peak 19.80M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftLeg
+Fra:1 Mem:19.87M (Peak 19.87M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftFoot
+Fra:1 Mem:19.93M (Peak 19.93M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftToeBase
+Fra:1 Mem:20.00M (Peak 20.00M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightShoulder
+Fra:1 Mem:20.06M (Peak 20.06M) | Time:00:00.01 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightArm
+Fra:1 Mem:20.13M (Peak 20.13M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightForeArm
+Fra:1 Mem:20.19M (Peak 20.19M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightHand
+Fra:1 Mem:20.40M (Peak 20.40M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightUpLeg
+Fra:1 Mem:20.47M (Peak 20.47M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightLeg
+Fra:1 Mem:20.81M (Peak 20.81M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightFoot
+Fra:1 Mem:20.95M (Peak 20.95M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Initializing
+Fra:1 Mem:20.28M (Peak 20.95M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Images | Loading Image_1
+Fra:1 Mem:20.28M (Peak 20.95M) | Time:00:00.02 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Images | Loading Image_0
+Fra:1 Mem:51.40M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Waiting for render to start
+Fra:1 Mem:51.40M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Loading render kernels (may take a few minutes the first time)
+Fra:1 Mem:51.40M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Scene
+Fra:1 Mem:51.40M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Shaders
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Procedurals
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Background
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Camera
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Meshes Flags
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Objects
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.00M, Peak:32.00M | Scene, ViewLayer | Updating Objects | Copying Transformations to device
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.01M, Peak:32.01M | Scene, ViewLayer | Updating Objects | Applying Static Transformations
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.01M, Peak:32.01M | Scene, ViewLayer | Updating Particle Systems
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.01M, Peak:32.01M | Scene, ViewLayer | Updating Particle Systems | Copying Particles to device
+Fra:1 Mem:51.49M (Peak 84.30M) | Time:00:00.53 | Mem:32.01M, Peak:32.01M | Scene, ViewLayer | Updating Meshes
+Fra:1 Mem:52.00M (Peak 84.30M) | Time:00:00.53 | Mem:32.01M, Peak:32.01M | Scene, ViewLayer | Updating Mesh | Computing attributes
+Fra:1 Mem:52.36M (Peak 84.30M) | Time:00:00.54 | Mem:32.01M, Peak:32.01M | Scene, ViewLayer | Updating Mesh | Copying Attributes to device
+Fra:1 Mem:52.36M (Peak 84.30M) | Time:00:00.54 | Mem:32.36M, Peak:32.36M | Scene, ViewLayer | Updating Scene BVH | Building
+Fra:1 Mem:52.36M (Peak 84.30M) | Time:00:00.54 | Mem:32.36M, Peak:32.36M | Scene, ViewLayer | Updating Scene BVH | Building BVH
+Fra:1 Mem:52.36M (Peak 84.30M) | Time:00:00.54 | Mem:33.38M, Peak:33.38M | Scene, ViewLayer | Updating Scene BVH | Building BVH 0%
+Fra:1 Mem:52.36M (Peak 84.30M) | Time:00:00.57 | Mem:34.60M, Peak:35.62M | Scene, ViewLayer | Updating Scene BVH | Copying BVH to device
+Fra:1 Mem:52.36M (Peak 84.30M) | Time:00:00.57 | Mem:34.60M, Peak:35.62M | Scene, ViewLayer | Updating Mesh | Computing normals
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:34.60M, Peak:35.62M | Scene, ViewLayer | Updating Mesh | Copying Mesh to device
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.75M, Peak:35.75M | Scene, ViewLayer | Updating Objects Flags
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.75M, Peak:35.75M | Scene, ViewLayer | Updating Primitive Offsets
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.75M, Peak:35.75M | Scene, ViewLayer | Updating Images
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.75M, Peak:35.75M | Scene, ViewLayer | Updating Camera Volume
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.75M, Peak:35.75M | Scene, ViewLayer | Updating Lookup Tables
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.83M, Peak:35.83M | Scene, ViewLayer | Updating Lights
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.83M, Peak:35.83M | Scene, ViewLayer | Updating Lights | Computing tree
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.83M, Peak:35.83M | Scene, ViewLayer | Updating Integrator
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.83M, Peak:35.83M | Scene, ViewLayer | Updating Film
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.75M, Peak:35.83M | Scene, ViewLayer | Updating Lookup Tables
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.84M, Peak:35.84M | Scene, ViewLayer | Updating Baking
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.84M, Peak:35.84M | Scene, ViewLayer | Updating Device | Writing constant memory
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.84M, Peak:35.84M | Scene, ViewLayer | Loading denoising kernels (may take a few minutes the first time)
+Fra:1 Mem:53.51M (Peak 84.30M) | Time:00:00.57 | Mem:35.84M, Peak:35.84M | Scene, ViewLayer | Sample 0/24
+Fra:1 Mem:129.52M (Peak 129.52M) | Time:00:01.70 | Remaining:00:25.91 | Mem:111.85M, Peak:111.85M | Scene, ViewLayer | Sample 1/24
+Fra:1 Mem:161.52M (Peak 209.52M) | Time:01:11.22 | Mem:111.85M, Peak:111.85M | Scene, ViewLayer | Sample 24/24
+Fra:1 Mem:161.52M (Peak 209.52M) | Time:01:11.23 | Mem:111.85M, Peak:111.85M | Scene, ViewLayer | Finished
+Saved: '/home/hatch/workspace/rpg-crawler-game/art-work/incoming/batch2/work_A/dbg_rogue.png'
+Time: 01:13.29 (Saving: 00:02.02)
+
+[rig] debug render -> /home/hatch/workspace/rpg-crawler-game/art-work/incoming/batch2/work_A/dbg_rogue.png
+01:29:24 | INFO: Starting glTF 2.0 export
+01:29:24 | INFO: Extracting primitive: textured_mesh.obj
+01:29:25 | WARNING: More than one shader node tex image used for a texture. The resulting glTF sampler will behave like the first shader node tex image.
+01:29:26 | INFO: Primitives created: 1
+01:29:26 | WARNING: There are more than 4 joint vertex influences.The 4 with highest weight will be used (and normalized).
+01:29:26 | INFO: Finished glTF 2.0 export in 1.4529914855957031 s
+INFO Draco mesh compression is available, use library at /home/hatch/workspace/tools/blender-4.2.3-linux-x64/4.2/python/lib/python3.11/site-packages/libextern_draco.so
+
+[rig] exported /home/hatch/workspace/rpg-crawler-game/art-work/incoming/batch2/work_A/rigged_rogue.glb
+[rig] DONE unweighted=0
+
+Blender quit

@@ -13,6 +13,7 @@
 // server, the network, or entity code.
 
 import * as THREE from '/vendor/three.module.js';
+import { mergeGeometries } from '/vendor/addons/utils/BufferGeometryUtils.js';
 // Phase 4 (workstream 6: PERFORMANCE PASS): InstancedMesh batching for static
 // props + distance LOD on instanced decor parts. See client/js/perf/.
 import { PropInstancer, STATIC_PROP_TYPES } from './perf/propInstancer.js';
@@ -60,6 +61,26 @@ function agedWood() { return mat('agedWood', () => std(0x5a3d22, 0.82, 0.0)); }
 function darkWood() { return mat('darkWood', () => std(0x3a2818, 0.85, 0.0)); }
 function gold() { return mat('gold', () => std(0xd4af37, 0.3, 0.9)); }
 function rubbleMat() { return mat('rubbleMat', () => std(0x55505a, 0.95, 0.02)); }
+// Biome-dressing pass: static emissive languages for the new instanced props.
+// Shared (cached) materials — never pulsed, so every instance stays cheap.
+function emberCrystalMat() {
+  return mat('emberCrystal', () => new THREE.MeshStandardMaterial({
+    color: 0x3a1a08, emissive: 0xff6a1a, emissiveIntensity: 1.6,
+    roughness: 0.35, metalness: 0.0, flatShading: true
+  }));
+}
+function coldCoalMat() {
+  return mat('coldCoals', () => new THREE.MeshStandardMaterial({
+    color: 0x2a0d05, emissive: 0xff5a1a, emissiveIntensity: 1.5,
+    roughness: 0.6, metalness: 0.0
+  }));
+}
+function glowDiscMat() {
+  return mat('glowDisc', () => new THREE.MeshBasicMaterial({
+    color: 0xff7a2a, transparent: true, opacity: 0.28,
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+  }));
+}
 
 function lavaMat() {
   return new THREE.MeshStandardMaterial({
@@ -80,6 +101,55 @@ function mesh(geoKey, geoMaker, material, x = 0, y = 0, z = 0, castShadow = fals
   return m;
 }
 
+// ---------------------------------------------------------------- merged parts
+// Biome-dressing pass: same-material sub-parts of a prop are merged into ONE
+// geometry (one draw call per material instead of per part). Each entry:
+//   { g: base THREE.BufferGeometry, p:[x,y,z], e:[rx,ry,rz], s:[sx,sy,sz]|n }
+// The merged result is cached under `key`. Template bakes are
+// seed-deterministic per (type, biome), so cache reuse across floors is
+// exact. Base geometries are cloned before transform — shared cached
+// geometry is never mutated.
+const _hm = new THREE.Matrix4();
+const _hq = new THREE.Quaternion();
+const _he = new THREE.Euler();
+const _hv = new THREE.Vector3();
+const _hs = new THREE.Vector3();
+
+function mergedGeo(key, parts) {
+  let g = geoCache.get(key);
+  if (g) return g;
+  const list = parts.map((pt) => {
+    const bg = pt.g.clone();
+    _he.set(pt.e ? pt.e[0] : 0, pt.e ? pt.e[1] : 0, pt.e ? pt.e[2] : 0);
+    _hq.setFromEuler(_he);
+    _hv.set(pt.p ? pt.p[0] : 0, pt.p ? pt.p[1] : 0, pt.p ? pt.p[2] : 0);
+    if (typeof pt.s === 'number') _hs.set(pt.s, pt.s, pt.s);
+    else _hs.set(pt.s ? pt.s[0] : 1, pt.s ? pt.s[1] : 1, pt.s ? pt.s[2] : 1);
+    _hm.compose(_hv, _hq, _hs);
+    bg.applyMatrix4(_hm);
+    return bg;
+  });
+  g = mergeGeometries(list, false);
+  for (const x of list) x.dispose();
+  geoCache.set(key, g);
+  return g;
+}
+
+// One merged mesh: `key` must be unique per (prop type, biome template,
+// material) because the merged layout is baked from the template seed.
+function mmesh(key, parts, material, x = 0, y = 0, z = 0, castShadow = false) {
+  const m = new THREE.Mesh(mergedGeo(key, parts), material);
+  m.position.set(x, y, z);
+  m.castShadow = castShadow;
+  m.receiveShadow = true;
+  return m;
+}
+
+// Shorthand part spec.
+const P = (g, p, e, s) => ({ g, p, e, s });
+const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+const cyl = (rt, rb, h, s = 8) => new THREE.CylinderGeometry(rt, rb, h, s);
+
 // ---------------------------------------------------------------- builders
 // Each builder: (rng, template, atmosphere) => { group, radius }
 const BUILDERS = {
@@ -97,39 +167,44 @@ const BUILDERS = {
     g.add(eff);
     const head = mesh('sarcHead', () => new THREE.SphereGeometry(0.24, 10, 8), bone(), 0.95, 1.12, 0);
     g.add(head);
-    // corner feet
-    for (const [fx, fz] of [[-1.1, -0.5], [1.1, -0.5], [-1.1, 0.5], [1.1, 0.5]]) {
-      g.add(mesh('sarcFoot', () => new THREE.BoxGeometry(0.35, 0.25, 0.35), cryptDark(), fx, 0.12, fz));
-    }
+    // corner feet merged into one part (one draw call)
+    g.add(mmesh('mg_sarcFeet', [
+      P(box(0.35, 0.25, 0.35), [-1.1, 0.12, -0.5]),
+      P(box(0.35, 0.25, 0.35), [1.1, 0.12, -0.5]),
+      P(box(0.35, 0.25, 0.35), [-1.1, 0.12, 0.5]),
+      P(box(0.35, 0.25, 0.35), [1.1, 0.12, 0.5])
+    ], cryptDark()));
     return { group: g, radius: 1.8 };
   },
 
   bone_pile(rng) {
     const g = new THREE.Group();
-    const n = 5 + Math.floor(rng() * 4);
+    // Bones merged per material: one draw call per material, not per bone.
+    const light = [], dark = [];
+    const n = 3 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
-      const b = mesh('boneBit', () => new THREE.BoxGeometry(0.7, 0.12, 0.16), rng() < 0.5 ? bone() : boneDark(),
-        (rng() - 0.5) * 1.6, 0.08 + rng() * 0.25, (rng() - 0.5) * 1.6);
-      b.rotation.set(0, rng() * Math.PI * 2, (rng() - 0.5) * 0.4);
-      g.add(b);
+      const spec = P(box(0.7, 0.12, 0.16),
+        [(rng() - 0.5) * 1.6, 0.08 + rng() * 0.25, (rng() - 0.5) * 1.6],
+        [0, rng() * Math.PI * 2, (rng() - 0.5) * 0.4]);
+      (rng() < 0.5 ? light : dark).push(spec);
     }
     // skull
-    const skull = mesh('skull', () => new THREE.SphereGeometry(0.22, 10, 8), bone(), (rng() - 0.5) * 1.2, 0.2, (rng() - 0.5) * 1.2);
-    skull.scale.set(1, 0.85, 1.1);
-    g.add(skull);
-    g.add(mesh('jaw', () => new THREE.BoxGeometry(0.22, 0.1, 0.26), boneDark(), skull.position.x, 0.08, skull.position.z + 0.12));
+    const sx = (rng() - 0.5) * 1.2, sz = (rng() - 0.5) * 1.2;
+    light.push(P(new THREE.SphereGeometry(0.22, 10, 8), [sx, 0.2, sz], null, [1, 0.85, 1.1]));
+    dark.push(P(box(0.22, 0.1, 0.26), [sx, 0.08, sz + 0.12]));
+    if (light.length) g.add(mmesh('mg_bonePile_light', light, bone()));
+    if (dark.length) g.add(mmesh('mg_bonePile_dark', dark, boneDark()));
     return { group: g, radius: 1.0 };
   },
 
   crypt_pillar(rng) {
     const g = new THREE.Group();
-    g.add(mesh('cpBase', () => new THREE.BoxGeometry(1.5, 0.5, 1.5), cryptDark(), 0, 0.25, 0, true));
+    g.add(mmesh('mg_cpTrim', [
+      P(box(1.5, 0.5, 1.5), [0, 0.25, 0]),
+      P(new THREE.TorusGeometry(0.66, 0.09, 8, 16), [0, 3.4, 0], [Math.PI / 2, 0, 0]),
+      P(box(1.5, 0.4, 1.5), [0, 4.5, 0])
+    ], cryptDark(), 0, 0, 0, true));
     g.add(mesh('cpShaft', () => new THREE.CylinderGeometry(0.55, 0.72, 3.8, 8), cryptStone(), 0, 2.4, 0, true));
-    // carved band
-    const band = mesh('cpBand', () => new THREE.TorusGeometry(0.66, 0.09, 8, 16), cryptDark(), 0, 3.4, 0);
-    band.rotation.x = Math.PI / 2;
-    g.add(band);
-    g.add(mesh('cpCap', () => new THREE.BoxGeometry(1.5, 0.4, 1.5), cryptDark(), 0, 4.5, 0));
     return { group: g, radius: 1.1 };
   },
 
@@ -155,43 +230,43 @@ const BUILDERS = {
   // ---- CAVERN ----
   stalagmite(rng) {
     const g = new THREE.Group();
+    // Cones merged per material: one draw call per material, not per cone.
+    const a = [], b = [];
     const n = 2 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
       const h = 1.4 + rng() * 1.8;
       const r = 0.35 + rng() * 0.4;
-      const c = mesh(`stalagmite_${i}`, () => new THREE.ConeGeometry(0.6, 2.2, 7), i % 2 ? cavernRock() : cavernRockDark(),
-        (rng() - 0.5) * 1.4, h / 2, (rng() - 0.5) * 1.4);
-      c.scale.set(r / 0.6, h / 2.2, r / 0.6);
-      g.add(c);
+      ((i % 2 ? b : a)).push(P(new THREE.ConeGeometry(0.6, 2.2, 7),
+        [(rng() - 0.5) * 1.4, h / 2, (rng() - 0.5) * 1.4], null, [r / 0.6, h / 2.2, r / 0.6]));
     }
+    if (a.length) g.add(mmesh('mg_stalagmite_a', a, cavernRock()));
+    if (b.length) g.add(mmesh('mg_stalagmite_b', b, cavernRockDark()));
     return { group: g, radius: 1.0 };
   },
 
   stalactite_cluster(rng) {
     const g = new THREE.Group();
-    const n = 3 + Math.floor(rng() * 3);
+    const parts = [];
+    const n = 3 + Math.floor(rng() * 2);
     for (let i = 0; i < n; i++) {
       const len = 1.2 + rng() * 1.6;
-      const c = mesh(`stalactite_${i}`, () => new THREE.ConeGeometry(0.45, 2.0, 7), cavernRockDark(),
-        (rng() - 0.5) * 1.8, 4.8 - len / 2, (rng() - 0.5) * 1.8);
-      c.scale.set(1, len / 2.0, 1);
-      c.rotation.x = Math.PI; // apex down
-      c.position.y = 4.8 - len / 2;
-      g.add(c);
+      parts.push(P(new THREE.ConeGeometry(0.45, 2.0, 7),
+        [(rng() - 0.5) * 1.8, 4.8 - len / 2, (rng() - 0.5) * 1.8],
+        [Math.PI, 0, 0], [1, len / 2.0, 1])); // apex down
     }
+    g.add(mmesh('mg_stalactite', parts, cavernRockDark()));
     return { group: g, radius: 1.2 };
   },
 
   rock_spire(rng) {
     const g = new THREE.Group();
-    const main = mesh('spireMain', () => new THREE.ConeGeometry(1.1, 4.4, 7), cavernRock(), 0, 2.2, 0, true);
-    g.add(main);
+    g.add(mesh('spireMain', () => new THREE.ConeGeometry(1.1, 4.4, 7), cavernRock(), 0, 2.2, 0, true));
+    const sides = [];
     for (let i = 0; i < 2; i++) {
-      const s = mesh(`spireSide_${i}`, () => new THREE.ConeGeometry(0.5, 2.0, 6), cavernRockDark(),
-        (rng() - 0.5) * 1.8, 1.0, (rng() - 0.5) * 1.8);
-      s.rotation.z = (rng() - 0.5) * 0.5;
-      g.add(s);
+      sides.push(P(new THREE.ConeGeometry(0.5, 2.0, 6),
+        [(rng() - 0.5) * 1.8, 1.0, (rng() - 0.5) * 1.8], [0, 0, (rng() - 0.5) * 0.5]));
     }
+    g.add(mmesh('mg_spireSides', sides, cavernRockDark()));
     return { group: g, radius: 1.3 };
   },
 
@@ -214,14 +289,15 @@ const BUILDERS = {
   // ---- FORGE ----
   anvil(rng) {
     const g = new THREE.Group();
-    g.add(mesh('anvilBase', () => new THREE.BoxGeometry(0.95, 0.5, 0.95), darkIron(), 0, 0.25, 0, true));
+    // All dark-iron parts merged into one draw call.
+    g.add(mmesh('mg_anvilIron', [
+      P(box(0.95, 0.5, 0.95), [0, 0.25, 0]),
+      P(box(0.5, 0.55, 0.5), [0, 1.05, 0]),
+      P(new THREE.ConeGeometry(0.32, 0.9, 10), [1.15, 1.5, 0], [0, 0, -Math.PI / 2])
+    ], darkIron(), 0, 0, 0, true));
     g.add(mesh('anvilStump', () => new THREE.BoxGeometry(1.1, 0.35, 1.1), basalt(), 0, 0.62, 0));
-    g.add(mesh('anvilWaist', () => new THREE.BoxGeometry(0.5, 0.55, 0.5), darkIron(), 0, 1.05, 0, true));
     const topMat = new THREE.MeshStandardMaterial({ color: 0x4a4a52, roughness: 0.35, metalness: 0.85, emissive: 0xff3300, emissiveIntensity: 0.22 });
     g.add(mesh('anvilTop', () => new THREE.BoxGeometry(1.7, 0.42, 0.72), topMat, 0, 1.5, 0));
-    const horn = mesh('anvilHorn', () => new THREE.ConeGeometry(0.32, 0.9, 10), darkIron(), 1.15, 1.5, 0);
-    horn.rotation.z = -Math.PI / 2;
-    g.add(horn);
     return { group: g, radius: 1.2 };
   },
 
@@ -246,17 +322,16 @@ const BUILDERS = {
 
   hanging_chain(rng) {
     const g = new THREE.Group();
-    const links = 7 + Math.floor(rng() * 4);
+    // All links + hook merged: one draw call for the whole chain.
+    const parts = [];
+    const links = 5 + Math.floor(rng() * 3);
     for (let i = 0; i < links; i++) {
-      const link = mesh(`chainLink_${i}`, () => new THREE.TorusGeometry(0.16, 0.045, 6, 10), rustedIron(),
-        0, 4.8 - i * 0.27, 0);
-      link.rotation.y = (i % 2) * Math.PI / 2;
-      g.add(link);
+      parts.push(P(new THREE.TorusGeometry(0.16, 0.045, 6, 10),
+        [0, 4.8 - i * 0.27, 0], [0, (i % 2) * Math.PI / 2, 0]));
     }
-    // hook at the end
-    const hook = mesh('chainHook', () => new THREE.TorusGeometry(0.2, 0.05, 6, 10, Math.PI * 1.4), rustedIron(), 0, 4.8 - links * 0.27, 0);
-    hook.rotation.z = Math.PI * 0.8;
-    g.add(hook);
+    parts.push(P(new THREE.TorusGeometry(0.2, 0.05, 6, 10, Math.PI * 1.4),
+      [0, 4.8 - links * 0.27, 0], [0, 0, Math.PI * 0.8]));
+    g.add(mmesh('mg_chain', parts, rustedIron()));
     return { group: g, radius: 0.5 };
   },
 
@@ -281,45 +356,50 @@ const BUILDERS = {
   throne(rng) {
     const g = new THREE.Group();
     g.add(mesh('throneDais', () => new THREE.BoxGeometry(3.4, 0.35, 2.6), marbleDark(), 0, 0.17, 0, true));
-    g.add(mesh('throneSeat', () => new THREE.BoxGeometry(1.7, 0.55, 1.4), darkWood(), 0, 0.62, 0, true));
+    // All dark-wood parts merged: seat, tall back, armrests.
+    g.add(mmesh('mg_throneWood', [
+      P(box(1.7, 0.55, 1.4), [0, 0.62, 0]),
+      P(box(1.7, 2.7, 0.32), [0, 2.2, -0.62]),
+      P(box(0.22, 0.9, 1.3), [-0.95, 1.25, 0]),
+      P(box(0.22, 0.9, 1.3), [0.95, 1.25, 0])
+    ], darkWood(), 0, 0, 0, true));
     // cushion
     g.add(mesh('throneCushion', () => new THREE.BoxGeometry(1.45, 0.18, 1.15),
       mat('crimson', () => std(0x7a1420, 0.7, 0.0)), 0, 0.95, 0));
-    // tall back
-    g.add(mesh('throneBack', () => new THREE.BoxGeometry(1.7, 2.7, 0.32), darkWood(), 0, 2.2, -0.62, true));
-    // gold trim on back
-    g.add(mesh('throneTrim', () => new THREE.BoxGeometry(1.78, 0.14, 0.36), gold(), 0, 3.35, -0.62));
-    g.add(mesh('throneTrim2', () => new THREE.BoxGeometry(0.14, 2.5, 0.36), gold(), -0.78, 2.2, -0.62));
-    g.add(mesh('throneTrim3', () => new THREE.BoxGeometry(0.14, 2.5, 0.36), gold(), 0.78, 2.2, -0.62));
-    // crown orb
-    g.add(mesh('throneOrb', () => new THREE.SphereGeometry(0.22, 12, 10), gold(), 0, 3.72, -0.62));
-    // armrests with posts
-    for (const sx of [-0.95, 0.95]) {
-      g.add(mesh(`throneArm_${sx < 0 ? 'l' : 'r'}`, () => new THREE.BoxGeometry(0.22, 0.9, 1.3), darkWood(), sx, 1.25, 0));
-      g.add(mesh(`thronePost_${sx < 0 ? 'l' : 'r'}`, () => new THREE.SphereGeometry(0.14, 8, 8), gold(), sx, 1.78, -0.55));
-    }
+    // All gold trim merged: top trim, side trims, crown orb, arm posts.
+    g.add(mmesh('mg_throneGold', [
+      P(box(1.78, 0.14, 0.36), [0, 3.35, -0.62]),
+      P(box(0.14, 2.5, 0.36), [-0.78, 2.2, -0.62]),
+      P(box(0.14, 2.5, 0.36), [0.78, 2.2, -0.62]),
+      P(new THREE.SphereGeometry(0.22, 12, 10), [0, 3.72, -0.62]),
+      P(new THREE.SphereGeometry(0.14, 8, 8), [-0.95, 1.78, -0.55]),
+      P(new THREE.SphereGeometry(0.14, 8, 8), [0.95, 1.78, -0.55])
+    ], gold()));
     return { group: g, radius: 2.2 };
   },
 
   grand_pillar(rng) {
     const g = new THREE.Group();
-    g.add(mesh('gpBase', () => new THREE.CylinderGeometry(1.0, 1.12, 0.5, 12), marbleDark(), 0, 0.25, 0, true));
+    g.add(mmesh('mg_gpMarbleDark', [
+      P(new THREE.CylinderGeometry(1.0, 1.12, 0.5, 12), [0, 0.25, 0]),
+      P(box(1.7, 0.42, 1.7), [0, 5.3, 0])
+    ], marbleDark(), 0, 0, 0, true));
     g.add(mesh('gpShaft', () => new THREE.CylinderGeometry(0.62, 0.78, 4.6, 12), marble(), 0, 2.8, 0, true));
-    for (const by of [1.6, 4.0]) {
-      const band = mesh(`gpBand_${by}`, () => new THREE.TorusGeometry(0.72, 0.07, 8, 18), gold(), 0, by, 0);
-      band.rotation.x = Math.PI / 2;
-      g.add(band);
-    }
-    g.add(mesh('gpCap', () => new THREE.BoxGeometry(1.7, 0.42, 1.7), marbleDark(), 0, 5.3, 0));
+    g.add(mmesh('mg_gpBands', [
+      P(new THREE.TorusGeometry(0.72, 0.07, 8, 18), [0, 1.6, 0], [Math.PI / 2, 0, 0]),
+      P(new THREE.TorusGeometry(0.72, 0.07, 8, 18), [0, 4.0, 0], [Math.PI / 2, 0, 0])
+    ], gold()));
     return { group: g, radius: 1.2 };
   },
 
   banner(rng, template) {
     const g = new THREE.Group();
-    g.add(mesh('bannerPole', () => new THREE.CylinderGeometry(0.07, 0.09, 3.4, 8), darkIron(), 0, 1.7, 0));
-    const bar = mesh('bannerBar', () => new THREE.CylinderGeometry(0.05, 0.05, 1.5, 6), darkIron(), 0, 3.25, 0);
-    bar.rotation.z = Math.PI / 2;
-    g.add(bar);
+    // pole, crossbar and wall bracket merged: one iron draw call.
+    g.add(mmesh('mg_bannerIron', [
+      P(cyl(0.07, 0.09, 3.4, 8), [0, 1.7, 0]),
+      P(cyl(0.05, 0.05, 1.5, 6), [0, 3.25, 0], [0, 0, Math.PI / 2]),
+      P(box(0.5, 0.12, 0.12), [0, 2.6, -0.25])
+    ], darkIron()));
     const clothMat = mat(`bannerCloth_${template.id}`, () =>
       std(template.id === 'throne_room' ? 0x6a1a2a : template.mood.accent, 0.85, 0.0, { side: THREE.DoubleSide }));
     const cloth = new THREE.Mesh(geo('bannerCloth', () => new THREE.PlaneGeometry(1.3, 2.3, 1, 4)), clothMat);
@@ -328,8 +408,6 @@ const BUILDERS = {
     g.add(cloth);
     // gold hem
     g.add(mesh('bannerHem', () => new THREE.BoxGeometry(1.32, 0.09, 0.03), gold(), 0, 0.9, 0.02));
-    // wall bracket
-    g.add(mesh('bannerBracket', () => new THREE.BoxGeometry(0.5, 0.12, 0.12), darkIron(), 0, 2.6, -0.25));
     return { group: g, radius: 0.6 };
   },
 
@@ -357,11 +435,185 @@ const BUILDERS = {
     const lid = mesh('chestLid', () => new THREE.BoxGeometry(1.25, 0.3, 0.82), darkWood(), 0, 0.8, -0.1);
     lid.rotation.x = -0.5; // ajar
     g.add(lid);
-    for (const bx of [-0.4, 0.4]) {
-      g.add(mesh(`chestBand_${bx}`, () => new THREE.BoxGeometry(0.12, 0.72, 0.86), darkIron(), bx, 0.36, 0));
-    }
+    g.add(mmesh('mg_chestBands', [
+      P(box(0.12, 0.72, 0.86), [-0.4, 0.36, 0]),
+      P(box(0.12, 0.72, 0.86), [0.4, 0.36, 0])
+    ], darkIron()));
     g.add(mesh('chestLock', () => new THREE.BoxGeometry(0.2, 0.24, 0.1), gold(), 0, 0.5, 0.43));
     return { group: g, radius: 1.0 };
+  },
+
+  // ---- BIOME DRESSING (Phase: level-design enrichment) ----
+  // All static: batched into InstancedMeshes via STATIC_PROP_TYPES. No
+  // atmosphere registration, no per-instance animation — one draw call per
+  // material per biome.
+
+  broken_pillar(rng) {
+    const g = new THREE.Group();
+    // snapped shaft stump, slightly tilted
+    const stump = mmesh('mg_brokenPillar', [
+      P(cyl(0.55, 0.72, 1.4, 8), [0, 0.7, 0], [0, 0, 0.08])
+    ], cryptStone(), 0, 0, 0, true);
+    g.add(stump);
+    // fallen capital chunk + chips lying beside it
+    g.add(mmesh('mg_brokenPillarFallen', [
+      P(box(0.95, 0.6, 0.95), [1.35, 0.3, 0.45], [0, rng() * Math.PI, 0.12]),
+      P(box(0.4, 0.25, 0.35), [0.7, 0.12, -0.6], [0, rng() * Math.PI, 0]),
+      P(box(0.3, 0.2, 0.28), [1.9, 0.1, -0.2], [0, rng() * Math.PI, 0])
+    ], cryptDark()));
+    return { group: g, radius: 1.3 };
+  },
+
+  tattered_banner(rng, template) {
+    const g = new THREE.Group();
+    g.add(mesh('tatteredPole', () => new THREE.CylinderGeometry(0.07, 0.09, 3.2, 8), darkIron(), 0, 1.6, 0));
+    // torn cloth: plane with a jagged, chewed bottom edge (seeded, baked)
+    const clothGeo = new THREE.PlaneGeometry(1.2, 2.1, 1, 4);
+    const pos = clothGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const y = pos.getY(i);
+      if (y < -0.6) {
+        pos.setY(i, y + rng() * 0.55);
+        pos.setZ(i, pos.getZ(i) + (rng() - 0.5) * 0.12);
+      }
+    }
+    clothGeo.computeVertexNormals();
+    const clothMat = mat(`tatteredCloth_${template.id}`, () =>
+      std(0x39435a, 0.9, 0.0, { side: THREE.DoubleSide }));
+    const cloth = new THREE.Mesh(geo(`tatteredClothGeo|${template.id}`, () => clothGeo), clothMat);
+    cloth.position.set(0, 1.95, 0.04);
+    cloth.receiveShadow = true;
+    g.add(cloth);
+    return { group: g, radius: 0.6 };
+  },
+
+  // Instanced floor decal: cracks / grime / lava seams per biome language.
+  // One 128px canvas texture per style, unlit (MeshBasicMaterial) so lava
+  // seams read as glowing in the dark without any light cost.
+  floor_decal(rng, template) {
+    const g = new THREE.Group();
+    const style = { crypt: 'crack', cavern: 'lavacrack', forge: 'ash', throne_room: 'grime' }[template.id] || 'crack';
+    const decalMat = mat(`floorDecal_${template.id}`, () => new THREE.MeshBasicMaterial({
+      map: paintDecalTexture(style),
+      transparent: true,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+      polygonOffsetUnits: -2
+    }));
+    const decal = new THREE.Mesh(geo('floorDecalPlane', () => new THREE.PlaneGeometry(1.7, 1.7)), decalMat);
+    decal.rotation.x = -Math.PI / 2;
+    decal.rotation.z = rng() * Math.PI * 2;
+    decal.position.y = 0.035;
+    const s = 0.8 + rng() * 0.7;
+    decal.scale.set(s, s, 1);
+    g.add(decal);
+    return { group: g, radius: 0.9 };
+  },
+
+  ember_crystal(rng) {
+    const g = new THREE.Group();
+    // crystal cluster merged into one emissive part
+    const parts = [
+      P(new THREE.OctahedronGeometry(0.55, 0), [0, 0.75, 0], [0, rng() * 3, 0.1], [1, 1.6, 1])
+    ];
+    for (let i = 0; i < 3; i++) {
+      const a = rng() * Math.PI * 2;
+      parts.push(P(new THREE.OctahedronGeometry(0.2 + rng() * 0.12, 0),
+        [Math.cos(a) * (0.5 + rng() * 0.3), 0.25 + rng() * 0.2, Math.sin(a) * (0.5 + rng() * 0.3)],
+        [(rng() - 0.5) * 0.6, rng() * 3, (rng() - 0.5) * 0.6]));
+    }
+    g.add(mmesh('mg_emberCrystal', parts, emberCrystalMat(), 0, 0, 0, true));
+    return { group: g, radius: 1.1 };
+  },
+
+  weapon_rack(rng) {
+    const g = new THREE.Group();
+    // A-frame rack: posts + crossbar merged (aged wood)
+    g.add(mmesh('mg_rackFrame', [
+      P(box(0.12, 1.5, 0.12), [-0.9, 0.75, 0], [0, 0, 0.06]),
+      P(box(0.12, 1.5, 0.12), [0.9, 0.75, 0], [0, 0, -0.06]),
+      P(box(2.0, 0.12, 0.12), [0, 1.32, 0])
+    ], agedWood(), 0, 0, 0, true));
+    // blades leaning on the crossbar, merged (dark iron)
+    const blades = [];
+    for (let i = -1; i <= 1; i++) {
+      blades.push(P(box(0.09, 1.35, 0.025), [i * 0.55, 0.75, 0.12], [-0.16, 0, i * 0.1]));
+      blades.push(P(box(0.2, 0.05, 0.05), [i * 0.55 - i * 0.07, 1.28, 0.02], [0, 0, i * 0.1])); // guard
+    }
+    g.add(mmesh('mg_rackBlades', blades, darkIron()));
+    return { group: g, radius: 1.3 };
+  },
+
+  chain_curtain(rng) {
+    const g = new THREE.Group();
+    // 4 hanging chain strands merged into one part + mount bar
+    const parts = [];
+    for (let s = 0; s < 4; s++) {
+      const x = -1.2 + s * 0.8;
+      const links = 6 + Math.floor(rng() * 2);
+      for (let i = 0; i < links; i++) {
+        parts.push(P(new THREE.TorusGeometry(0.14, 0.04, 6, 10),
+          [x, 4.55 - i * 0.24, 0], [0, (i % 2) * Math.PI / 2, 0]));
+      }
+    }
+    g.add(mmesh('mg_chainCurtain', parts, rustedIron()));
+    g.add(mesh('curtainBar', () => new THREE.BoxGeometry(3.0, 0.18, 0.18), darkIron(), 0, 4.72, 0));
+    return { group: g, radius: 1.5 };
+  },
+
+  // Cold brazier: static (instanced) variant of the dynamic brazier — bowl +
+  // emissive coals + additive glow disc. Flame glow with zero light cost and
+  // zero per-instance animation; pairs with the forge's ember particles.
+  brazier_cold(rng) {
+    const g = new THREE.Group();
+    g.add(mmesh('mg_coldBrazierIron', [
+      P(cyl(0.09, 0.14, 1.1, 8), [0, 0.55, 0]),
+      P(cyl(0.55, 0.28, 0.42, 10), [0, 1.28, 0]),
+      P(cyl(0.05, 0.07, 0.5, 6), [0.3, 0.25, 0.2], [0, 0, 0.25]),
+      P(cyl(0.05, 0.07, 0.5, 6), [-0.3, 0.25, 0.2], [0, 0, -0.25]),
+      P(cyl(0.05, 0.07, 0.5, 6), [0, 0.25, -0.35], [0.25, 0, 0])
+    ], darkIron(), 0, 0, 0, true));
+    const coals = new THREE.Mesh(geo('coldCoalsDisc', () => new THREE.CircleGeometry(0.42, 12)), coldCoalMat());
+    coals.rotation.x = -Math.PI / 2;
+    coals.position.y = 1.46;
+    g.add(coals);
+    const glow = new THREE.Mesh(geo('coldBrazierGlow', () => new THREE.CircleGeometry(0.95, 16)), glowDiscMat());
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.y = 1.52;
+    g.add(glow);
+    return { group: g, radius: 0.9 };
+  },
+
+  statue(rng) {
+    const g = new THREE.Group();
+    g.add(mesh('statuePedestal', () => new THREE.BoxGeometry(1.3, 0.9, 1.3), marbleDark(), 0, 0.45, 0, true));
+    // covenant knight figure merged into one marble part
+    g.add(mmesh('mg_statueFigure', [
+      P(box(0.55, 0.95, 0.4), [0, 1.62, 0]),
+      P(box(0.8, 0.18, 0.42), [0, 2.02, 0]),
+      P(new THREE.SphereGeometry(0.2, 10, 8), [0, 2.32, 0]),
+      P(box(0.14, 0.7, 0.14), [-0.42, 1.55, 0.1], [0, 0, 0.15]),
+      P(box(0.14, 0.7, 0.14), [0.42, 1.55, 0.1], [0, 0, -0.15]),
+      P(box(0.09, 1.15, 0.09), [0.62, 1.35, 0.25], [0.1, 0, -0.2]), // greatsword at rest
+      P(box(0.3, 0.06, 0.06), [0.52, 1.85, 0.22], [0, 0, -0.2])   // crossguard
+    ], marble(), 0, 0, 0, true));
+    return { group: g, radius: 1.2 };
+  },
+
+  tall_banner(rng, template) {
+    const g = new THREE.Group();
+    g.add(mesh('tallBannerPole', () => new THREE.CylinderGeometry(0.08, 0.1, 4.4, 8), darkIron(), 0, 2.2, 0));
+    const clothMat = mat(`tallBannerCloth_${template.id}`, () =>
+      std(template.id === 'throne_room' ? 0x6a1a2a : template.mood.accent, 0.85, 0.0, { side: THREE.DoubleSide }));
+    const cloth = new THREE.Mesh(geo('tallBannerCloth', () => new THREE.PlaneGeometry(1.5, 3.1, 1, 5)), clothMat);
+    cloth.position.set(0, 2.55, 0.03);
+    cloth.receiveShadow = true;
+    g.add(cloth);
+    g.add(mesh('tallBannerHem', () => new THREE.BoxGeometry(1.52, 0.1, 0.04), gold(), 0, 1.0, 0.03));
+    // finial
+    g.add(mesh('tallBannerFinial', () => new THREE.SphereGeometry(0.12, 8, 8), gold(), 0, 4.48, 0));
+    return { group: g, radius: 0.6 };
   },
 
   // ---- SHARED ----
@@ -385,17 +637,18 @@ const BUILDERS = {
     return { group: g, radius: 0.5 };
   },
 
-  rubble(rng) {
+  rubble(rng, template) {
     const g = new THREE.Group();
+    // All rubble chunks merged: one draw call per rubble prop.
+    const parts = [];
     const n = 3 + Math.floor(rng() * 3);
     for (let i = 0; i < n; i++) {
       const s = 0.2 + rng() * 0.45;
-      const r = mesh(`rubble_${i}`, () => new THREE.BoxGeometry(1, 0.7, 0.8), rubbleMat(),
-        (rng() - 0.5) * 1.4, s * 0.3, (rng() - 0.5) * 1.4);
-      r.scale.setScalar(s);
-      r.rotation.set(0, rng() * Math.PI * 2, 0);
-      g.add(r);
+      parts.push(P(box(1, 0.7, 0.8),
+        [(rng() - 0.5) * 1.4, s * 0.3, (rng() - 0.5) * 1.4],
+        [0, rng() * Math.PI * 2, 0], s));
     }
+    g.add(mmesh(`mg_rubble|${template.id}`, parts, rubbleMat()));
     return { group: g, radius: 0.9 };
   }
 };
@@ -456,6 +709,116 @@ function paintFloorTexture(style) {
   tex.wrapT = THREE.RepeatWrapping;
   tex.needsUpdate = true;
   floorTexCache.set(style, tex);
+  return tex;
+}
+
+// ---------------------------------------------------------------- floor decals
+// Instanced ground-detail decals: dark cracks, glowing lava seams, ash and
+// grime. One 128px canvas texture per style (cached); drawn with a
+// style-seeded rng so the texture is identical on every floor.
+const decalTexCache = new Map();
+
+function decalRng(style) {
+  let h = 2166136261;
+  for (let i = 0; i < style.length; i++) { h ^= style.charCodeAt(i); h = Math.imul(h, 16777619); }
+  let a = h >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function jaggedLine(ctx, rng, x, y, len, ang, segs, wobble) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  let cx = x, cy = y, a = ang;
+  for (let i = 0; i < segs; i++) {
+    a += (rng() - 0.5) * wobble;
+    const step = len / segs;
+    cx += Math.cos(a) * step;
+    cy += Math.sin(a) * step;
+    ctx.lineTo(cx, cy);
+  }
+  ctx.stroke();
+}
+
+function paintDecalTexture(style) {
+  let tex = decalTexCache.get(style);
+  if (tex) return tex;
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 128;
+  const ctx = c.getContext('2d');
+  const rng = decalRng(style);
+
+  if (style === 'crack') {
+    // dark jagged floor cracks (crypt)
+    ctx.strokeStyle = 'rgba(2,4,8,0.75)';
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 4; i++) {
+      ctx.lineWidth = 2.5 + rng() * 2.5;
+      jaggedLine(ctx, rng, 20 + rng() * 88, 20 + rng() * 88, 40 + rng() * 50, rng() * Math.PI * 2, 7, 1.1);
+    }
+    ctx.fillStyle = 'rgba(2,4,8,0.4)';
+    for (let i = 0; i < 6; i++) {
+      ctx.beginPath();
+      ctx.arc(rng() * 128, rng() * 128, 3 + rng() * 8, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  } else if (style === 'lavacrack') {
+    // glowing lava seams (cavern) — unlit material, reads as emissive
+    ctx.lineCap = 'round';
+    for (let i = 0; i < 3; i++) {
+      const x = 24 + rng() * 80, y = 24 + rng() * 80, ang = rng() * Math.PI * 2;
+      ctx.strokeStyle = 'rgba(255,90,20,0.85)';
+      ctx.lineWidth = 5 + rng() * 3;
+      jaggedLine(ctx, rng, x, y, 50 + rng() * 45, ang, 8, 1.0);
+      ctx.strokeStyle = 'rgba(255,205,130,0.95)';
+      ctx.lineWidth = 1.8;
+      jaggedLine(ctx, rng, x, y, 50 + rng() * 45, ang, 8, 1.0);
+    }
+  } else if (style === 'ash') {
+    // scorched ash blotches (forge)
+    for (let i = 0; i < 14; i++) {
+      const r = 4 + rng() * 12;
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0, 'rgba(12,8,6,0.55)');
+      g.addColorStop(1, 'rgba(12,8,6,0)');
+      ctx.save();
+      ctx.translate(rng() * 128, rng() * 128);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = 'rgba(10,6,5,0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 2; i++) {
+      jaggedLine(ctx, rng, 20 + rng() * 88, 20 + rng() * 88, 35 + rng() * 40, rng() * Math.PI * 2, 6, 1.2);
+    }
+  } else {
+    // grime: worn dark patches (throne room)
+    for (let i = 0; i < 10; i++) {
+      const r = 6 + rng() * 16;
+      const g = ctx.createRadialGradient(0, 0, 0, 0, 0, r);
+      g.addColorStop(0, 'rgba(5,4,8,0.42)');
+      g.addColorStop(1, 'rgba(5,4,8,0)');
+      ctx.save();
+      ctx.translate(rng() * 128, rng() * 128);
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  tex = new THREE.CanvasTexture(c);
+  tex.needsUpdate = true;
+  decalTexCache.set(style, tex);
   return tex;
 }
 

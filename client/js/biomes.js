@@ -44,10 +44,10 @@ export const BIOME_TEMPLATES = {
     name: 'The Sunken Crypt',
     subtitle: 'Bone vaults & cold blue mist',
     floorStyle: 'crypt',
-    fog: { color: 0x0a1626, density: 0.030 },
+    fog: { color: 0x0b1c20, density: 0.036 },
     mood: {
-      ambient: 0x33465e, ambientIntensity: 0.55,
-      hemiSky: 0x5a7a9a, hemiGround: 0x0b0906, hemiIntensity: 0.4,
+      ambient: 0x3a5a60, ambientIntensity: 0.55,
+      hemiSky: 0x5f8a8a, hemiGround: 0x0b0906, hemiIntensity: 0.42,
       accent: 0x77ccff, torchLight: 0x66aaff
     },
     particles: { kind: 'dust', color: 0x9fc8ee, count: 150, size: 0.13, speed: 0.35, rise: false },
@@ -56,9 +56,12 @@ export const BIOME_TEMPLATES = {
       { type: 'sarcophagus', min: 2, max: 4, placement: 'perimeter', radius: 1.8 },
       { type: 'bone_pile', min: 2, max: 5, placement: 'scatter', radius: 1.0 },
       { type: 'crypt_pillar', min: 2, max: 4, placement: 'corners', radius: 1.1 },
+      { type: 'broken_pillar', min: 2, max: 4, placement: 'scatter', radius: 1.3 },
+      { type: 'tattered_banner', min: 1, max: 3, placement: 'wall', radius: 0.6 },
       { type: 'torch', min: 3, max: 5, placement: 'wall', radius: 0.5 },
       { type: 'altar', min: 0, max: 1, placement: 'center', radius: 1.6 },
-      { type: 'rubble', min: 2, max: 4, placement: 'scatter', radius: 0.9 }
+      { type: 'rubble', min: 2, max: 4, placement: 'scatter', radius: 0.9 },
+      { type: 'floor_decal', min: 4, max: 8, placement: 'scatter', radius: 0.9 }
     ]
   },
 
@@ -67,21 +70,23 @@ export const BIOME_TEMPLATES = {
     name: 'The Ember Cavern',
     subtitle: 'Rough rock & ember-orange underlight',
     floorStyle: 'cavern',
-    fog: { color: 0x160d05, density: 0.034 },
+    fog: { color: 0x1a0e04, density: 0.038 },
     mood: {
-      ambient: 0x5e3a22, ambientIntensity: 0.5,
-      hemiSky: 0x8a5a2a, hemiGround: 0x0d0805, hemiIntensity: 0.4,
+      ambient: 0x6e4020, ambientIntensity: 0.55,
+      hemiSky: 0x9a6530, hemiGround: 0x0d0805, hemiIntensity: 0.42,
       accent: 0xff8833, torchLight: 0xff9540
     },
-    particles: { kind: 'ash', color: 0xd88a4a, count: 170, size: 0.15, speed: 0.5, rise: true },
+    particles: { kind: 'embers', color: 0xff9a4a, count: 190, size: 0.15, speed: 0.55, rise: true },
     torch: { flame: 0xffaa44, light: 0xff9540 },
     props: [
       { type: 'stalagmite', min: 3, max: 6, placement: 'scatter', radius: 1.0 },
       { type: 'stalactite_cluster', min: 2, max: 4, placement: 'ceiling', radius: 1.2 },
       { type: 'rock_spire', min: 1, max: 3, placement: 'corners', radius: 1.3 },
+      { type: 'ember_crystal', min: 2, max: 4, placement: 'scatter', radius: 1.1 },
       { type: 'ember_vent', min: 2, max: 4, placement: 'scatter', radius: 1.1 },
       { type: 'torch', min: 2, max: 4, placement: 'wall', radius: 0.5 },
-      { type: 'rubble', min: 3, max: 6, placement: 'scatter', radius: 0.9 }
+      { type: 'rubble', min: 3, max: 6, placement: 'scatter', radius: 0.9 },
+      { type: 'floor_decal', min: 3, max: 6, placement: 'scatter', radius: 0.9 }
     ]
   },
 
@@ -90,21 +95,25 @@ export const BIOME_TEMPLATES = {
     name: 'The Soul-Forge',
     subtitle: 'Anvils, lava channels & hanging chains',
     floorStyle: 'forge',
-    fog: { color: 0x1a0a04, density: 0.030 },
+    fog: { color: 0x1e0c05, density: 0.040 },
     mood: {
-      ambient: 0x6e3418, ambientIntensity: 0.55,
-      hemiSky: 0x9a5a22, hemiGround: 0x100603, hemiIntensity: 0.42,
+      ambient: 0x7a3a1a, ambientIntensity: 0.62,
+      hemiSky: 0xa8622a, hemiGround: 0x100603, hemiIntensity: 0.45,
       accent: 0xff6622, torchLight: 0xff7722
     },
     particles: { kind: 'embers', color: 0xff8844, count: 190, size: 0.12, speed: 1.1, rise: true },
     torch: { flame: 0xff8822, light: 0xff7722 },
     props: [
       { type: 'anvil', min: 1, max: 3, placement: 'scatter', radius: 1.2 },
+      { type: 'weapon_rack', min: 1, max: 3, placement: 'perimeter', radius: 1.3 },
       { type: 'lava_channel', min: 2, max: 3, placement: 'floor_strip', radius: 2.6 },
       { type: 'hanging_chain', min: 3, max: 6, placement: 'ceiling', radius: 0.5 },
+      { type: 'chain_curtain', min: 2, max: 4, placement: 'ceiling', radius: 1.5 },
       { type: 'crucible', min: 1, max: 2, placement: 'perimeter', radius: 1.2 },
+      { type: 'brazier_cold', min: 2, max: 4, placement: 'perimeter', radius: 0.9 },
       { type: 'torch', min: 2, max: 4, placement: 'wall', radius: 0.5 },
-      { type: 'rubble', min: 2, max: 4, placement: 'scatter', radius: 0.9 }
+      { type: 'rubble', min: 2, max: 4, placement: 'scatter', radius: 0.9 },
+      { type: 'floor_decal', min: 3, max: 6, placement: 'scatter', radius: 0.9 }
     ]
   },
 
@@ -115,19 +124,22 @@ export const BIOME_TEMPLATES = {
     floorStyle: 'throne',
     fog: { color: 0x0d0a16, density: 0.022 },
     mood: {
-      ambient: 0x4a3d5e, ambientIntensity: 0.6,
-      hemiSky: 0x8a76aa, hemiGround: 0x0d0a08, hemiIntensity: 0.42,
+      ambient: 0x51466a, ambientIntensity: 0.65,
+      hemiSky: 0x9484b8, hemiGround: 0x0d0a08, hemiIntensity: 0.45,
       accent: 0xd4af37, torchLight: 0xffcc66
     },
     particles: { kind: 'motes', color: 0xd4b86a, count: 130, size: 0.11, speed: 0.3, rise: false },
     torch: { flame: 0xffcc55, light: 0xffcc66 },
     props: [
       { type: 'throne', min: 0, max: 1, placement: 'far_wall', radius: 2.2 },
+      { type: 'statue', min: 1, max: 2, placement: 'perimeter', radius: 1.2 },
       { type: 'grand_pillar', min: 2, max: 4, placement: 'aisle', radius: 1.2 },
       { type: 'banner', min: 2, max: 4, placement: 'wall', radius: 0.6 },
+      { type: 'tall_banner', min: 2, max: 4, placement: 'wall', radius: 0.6 },
       { type: 'brazier', min: 2, max: 4, placement: 'perimeter', radius: 0.9 },
       { type: 'chest', min: 0, max: 1, placement: 'corners', radius: 1.0 },
-      { type: 'torch', min: 2, max: 4, placement: 'wall', radius: 0.5 }
+      { type: 'torch', min: 2, max: 4, placement: 'wall', radius: 0.5 },
+      { type: 'floor_decal', min: 3, max: 5, placement: 'scatter', radius: 0.9 }
     ]
   }
 };
