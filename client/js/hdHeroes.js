@@ -23,6 +23,7 @@
 
 import * as THREE from '/vendor/three.module.js';
 import { GLTFLoader } from '/vendor/addons/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from '/vendor/addons/libs/meshopt_decoder.module.js';
 import { clone as skeletonClone } from '/vendor/addons/utils/SkeletonUtils.js';
 
 // ---------------------------------------------------------------------------
@@ -82,7 +83,12 @@ let _hdLoader = null;
 let _hdPreloadState = 'idle'; // idle | loading | ready | failed
 
 function _getLoader() {
-  if (!_hdLoader) _hdLoader = new GLTFLoader();
+  if (!_hdLoader) {
+    _hdLoader = new GLTFLoader();
+    // Batch-1 HD heroes are meshopt-compressed (gltfpack -c with
+    // KHR_mesh_quantization); decode them client-side.
+    _hdLoader.setMeshoptDecoder(MeshoptDecoder);
+  }
   return _hdLoader;
 }
 

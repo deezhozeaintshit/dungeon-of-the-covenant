@@ -1,0 +1,142 @@
+[rig] targets: tris=30000 height=1.95
+00:40:16 | INFO: Data are loaded, start creating Blender stuff
+00:40:16 | INFO: Blender create Mesh node geometry_0
+00:40:16 | INFO: glTF import finished in 0.17s
+[rig] floor peel: removed 808 faces below z=-0.3964 (spike 11954 verts)
+Info: Removed 4972 vertices
+Info: Removed: 386 vertices, 1192 edges, 0 faces
+[rig] dropped 50 debris faces (islands<60 faces, biggest=14422)
+[rig] cleaned: 7249 verts
+[rig] raw height 0.934 m -> 1.95 m (scale 2.0870)
+[rig] tris before decimate: 14422
+[rig] analyzing joints, H=1.950
+[rig] leg peaks detected -> symmetric x=+-0.213
+[rig] shoulder x=+-0.332 (surf 0.641)
+[rig] joint Hips           (+0.000, +0.074, +1.034)
+[rig] joint Spine          (+0.000, +0.141, +1.170)
+[rig] joint Spine1         (+0.000, +0.037, +1.326)
+[rig] joint Spine2         (+0.000, -0.000, +1.482)
+[rig] joint Neck           (+0.000, +0.073, +1.658)
+[rig] joint Head           (+0.000, +0.025, +1.804)
+[rig] joint LeftShoulder   (+0.149, +0.166, +1.580)
+[rig] joint LeftArm        (+0.331, +0.172, +1.560)
+[rig] joint LeftForeArm    (+0.453, +0.062, +1.194)
+[rig] joint LeftHand       (+0.602, -0.072, +0.747)
+[rig] joint LeftUpLeg      (+0.213, +0.034, +0.975)
+[rig] joint LeftLeg        (+0.213, -0.166, +0.526)
+[rig] joint LeftFoot       (+0.213, +0.052, +0.146)
+[rig] joint LeftToeBase    (+0.213, -0.143, +0.059)
+[rig] joint RightShoulder  (-0.149, +0.166, +1.580)
+[rig] joint RightArm       (-0.331, +0.121, +1.560)
+[rig] joint RightForeArm   (-0.419, +0.256, +1.204)
+[rig] joint RightHand      (-0.527, +0.422, +0.768)
+[rig] joint RightUpLeg     (-0.213, +0.140, +0.975)
+[rig] joint RightLeg       (-0.213, -0.080, +0.526)
+[rig] joint RightFoot      (-0.213, -0.191, +0.146)
+[rig] joint RightToeBase   (-0.213, -0.386, +0.059)
+[rig] bone Hips           head=(+0.000,+0.074,+1.034) len=0.230
+[rig] bone Spine          head=(+0.000,+0.141,+1.170) len=0.188
+[rig] bone Spine1         head=(+0.000,+0.037,+1.326) len=0.160
+[rig] bone Spine2         head=(+0.000,-0.000,+1.482) len=0.244
+[rig] bone Neck           head=(+0.000,+0.073,+1.658) len=0.154
+[rig] bone Head           head=(+0.000,+0.025,+1.804) len=0.160
+[rig] bone LeftShoulder   head=(+0.149,+0.166,+1.580) len=0.183
+[rig] bone LeftArm        head=(+0.331,+0.172,+1.560) len=0.401
+[rig] bone LeftForeArm    head=(+0.453,+0.062,+1.194) len=0.490
+[rig] bone LeftHand       head=(+0.602,-0.072,+0.747) len=0.130
+[rig] bone RightShoulder  head=(-0.149,+0.166,+1.580) len=0.189
+[rig] bone RightArm       head=(-0.331,+0.121,+1.560) len=0.391
+[rig] bone RightForeArm   head=(-0.419,+0.256,+1.204) len=0.478
+[rig] bone RightHand      head=(-0.527,+0.422,+0.768) len=0.130
+[rig] bone LeftUpLeg      head=(+0.213,+0.034,+0.975) len=0.491
+[rig] bone LeftLeg        head=(+0.213,-0.166,+0.526) len=0.438
+[rig] bone LeftFoot       head=(+0.213,+0.052,+0.146) len=0.214
+[rig] bone LeftToeBase    head=(+0.213,-0.143,+0.059) len=0.070
+[rig] bone RightUpLeg     head=(-0.213,+0.140,+0.975) len=0.499
+[rig] bone RightLeg       head=(-0.213,-0.080,+0.526) len=0.396
+[rig] bone RightFoot      head=(-0.213,-0.191,+0.146) len=0.214
+[rig] bone RightToeBase   head=(-0.213,-0.386,+0.059) len=0.070
+[rig] vertex groups: 22, unweighted verts: 0/7249
+Blender 4.2.3 LTS (hash 0e22e4fcea03 built 2024-10-14 23:31:34)
+Fra:1 Mem:17.12M (Peak 17.12M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | geometry_0
+Fra:1 Mem:18.13M (Peak 18.13M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Hips
+Fra:1 Mem:18.19M (Peak 18.19M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Spine
+Fra:1 Mem:18.26M (Peak 18.26M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Spine1
+Fra:1 Mem:18.32M (Peak 18.32M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Spine2
+Fra:1 Mem:18.39M (Peak 18.39M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Neck
+Fra:1 Mem:18.45M (Peak 18.45M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_Head
+Fra:1 Mem:18.52M (Peak 18.52M) | Time:00:00.04 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftShoulder
+Fra:1 Mem:18.59M (Peak 18.59M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftArm
+Fra:1 Mem:18.65M (Peak 18.65M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftForeArm
+Fra:1 Mem:18.72M (Peak 18.72M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftHand
+Fra:1 Mem:18.78M (Peak 18.78M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftUpLeg
+Fra:1 Mem:18.85M (Peak 18.85M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftLeg
+Fra:1 Mem:18.91M (Peak 18.91M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftFoot
+Fra:1 Mem:19.03M (Peak 19.03M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_LeftToeBase
+Fra:1 Mem:19.10M (Peak 19.10M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightShoulder
+Fra:1 Mem:19.17M (Peak 19.17M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightArm
+Fra:1 Mem:19.23M (Peak 19.23M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightForeArm
+Fra:1 Mem:19.30M (Peak 19.30M) | Time:00:00.05 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightHand
+Fra:1 Mem:19.36M (Peak 19.36M) | Time:00:00.06 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightUpLeg
+Fra:1 Mem:19.43M (Peak 19.43M) | Time:00:00.06 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightLeg
+Fra:1 Mem:19.49M (Peak 19.49M) | Time:00:00.06 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightFoot
+Fra:1 Mem:19.56M (Peak 19.56M) | Time:00:00.06 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Synchronizing object | DBG_RightToeBase
+Fra:1 Mem:20.12M (Peak 20.12M) | Time:00:00.07 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Initializing
+Fra:1 Mem:19.35M (Peak 20.12M) | Time:00:00.07 | Mem:0.00M, Peak:0.00M | Scene, ViewLayer | Updating Images | Loading Image_0
+Fra:1 Mem:22.49M (Peak 31.36M) | Time:00:00.35 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Waiting for render to start
+Fra:1 Mem:22.50M (Peak 31.36M) | Time:00:00.35 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Loading render kernels (may take a few minutes the first time)
+Fra:1 Mem:22.50M (Peak 31.36M) | Time:00:00.35 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Scene
+Fra:1 Mem:22.50M (Peak 31.36M) | Time:00:00.35 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Shaders
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.35 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Procedurals
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Background
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Camera
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Meshes Flags
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Objects
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.00M, Peak:4.00M | Scene, ViewLayer | Updating Objects | Copying Transformations to device
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.01M, Peak:4.01M | Scene, ViewLayer | Updating Objects | Applying Static Transformations
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.01M, Peak:4.01M | Scene, ViewLayer | Updating Particle Systems
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.01M, Peak:4.01M | Scene, ViewLayer | Updating Particle Systems | Copying Particles to device
+Fra:1 Mem:22.58M (Peak 31.36M) | Time:00:00.36 | Mem:4.01M, Peak:4.01M | Scene, ViewLayer | Updating Meshes
+Fra:1 Mem:23.13M (Peak 31.36M) | Time:00:00.36 | Mem:4.01M, Peak:4.01M | Scene, ViewLayer | Updating Mesh | Computing attributes
+Fra:1 Mem:23.54M (Peak 31.36M) | Time:00:00.36 | Mem:4.01M, Peak:4.01M | Scene, ViewLayer | Updating Mesh | Copying Attributes to device
+Fra:1 Mem:23.54M (Peak 31.36M) | Time:00:00.36 | Mem:4.42M, Peak:4.42M | Scene, ViewLayer | Updating Scene BVH | Building
+Fra:1 Mem:23.54M (Peak 31.36M) | Time:00:00.36 | Mem:4.42M, Peak:4.42M | Scene, ViewLayer | Updating Scene BVH | Building BVH
+Fra:1 Mem:23.54M (Peak 31.36M) | Time:00:00.36 | Mem:5.51M, Peak:5.51M | Scene, ViewLayer | Updating Scene BVH | Building BVH 0%
+Fra:1 Mem:23.54M (Peak 31.36M) | Time:00:00.48 | Mem:6.69M, Peak:7.77M | Scene, ViewLayer | Updating Scene BVH | Copying BVH to device
+Fra:1 Mem:23.54M (Peak 31.36M) | Time:00:00.48 | Mem:6.69M, Peak:7.77M | Scene, ViewLayer | Updating Mesh | Computing normals
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:6.69M, Peak:7.77M | Scene, ViewLayer | Updating Mesh | Copying Mesh to device
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.91M, Peak:7.91M | Scene, ViewLayer | Updating Objects Flags
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.91M, Peak:7.91M | Scene, ViewLayer | Updating Primitive Offsets
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.91M, Peak:7.91M | Scene, ViewLayer | Updating Images
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.91M, Peak:7.91M | Scene, ViewLayer | Updating Camera Volume
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.91M, Peak:7.91M | Scene, ViewLayer | Updating Lookup Tables
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.99M, Peak:7.99M | Scene, ViewLayer | Updating Lights
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.99M, Peak:7.99M | Scene, ViewLayer | Updating Lights | Computing tree
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.99M, Peak:7.99M | Scene, ViewLayer | Updating Integrator
+Fra:1 Mem:24.76M (Peak 31.36M) | Time:00:00.48 | Mem:7.99M, Peak:7.99M | Scene, ViewLayer | Updating Film
+Fra:1 Mem:24.77M (Peak 31.36M) | Time:00:00.49 | Mem:7.91M, Peak:7.99M | Scene, ViewLayer | Updating Lookup Tables
+Fra:1 Mem:24.77M (Peak 31.36M) | Time:00:00.49 | Mem:8.00M, Peak:8.00M | Scene, ViewLayer | Updating Baking
+Fra:1 Mem:24.77M (Peak 31.36M) | Time:00:00.49 | Mem:8.00M, Peak:8.00M | Scene, ViewLayer | Updating Device | Writing constant memory
+Fra:1 Mem:24.77M (Peak 31.36M) | Time:00:00.49 | Mem:8.00M, Peak:8.00M | Scene, ViewLayer | Loading denoising kernels (may take a few minutes the first time)
+Fra:1 Mem:24.77M (Peak 31.36M) | Time:00:00.49 | Mem:8.00M, Peak:8.00M | Scene, ViewLayer | Sample 0/24
+Fra:1 Mem:100.78M (Peak 100.78M) | Time:00:03.67 | Remaining:01:13.25 | Mem:84.01M, Peak:84.01M | Scene, ViewLayer | Sample 1/24
+Fra:1 Mem:100.78M (Peak 100.78M) | Time:00:27.87 | Remaining:00:45.63 | Mem:84.01M, Peak:84.01M | Scene, ViewLayer | Sample 9/24
+Fra:1 Mem:100.78M (Peak 100.78M) | Time:00:52.45 | Remaining:00:21.39 | Mem:84.01M, Peak:84.01M | Scene, ViewLayer | Sample 17/24
+Fra:1 Mem:132.78M (Peak 180.78M) | Time:02:21.16 | Mem:84.01M, Peak:84.01M | Scene, ViewLayer | Sample 24/24
+Fra:1 Mem:132.78M (Peak 180.78M) | Time:02:21.16 | Mem:84.01M, Peak:84.01M | Scene, ViewLayer | Finished
+Saved: '/home/hatch/workspace/rpg-crawler-game/art-work/incoming/batch2/work_B/dbg_boss_malakor.png'
+Time: 02:23.88 (Saving: 00:02.71)
+
+[rig] debug render -> /home/hatch/workspace/rpg-crawler-game/art-work/incoming/batch2/work_B/dbg_boss_malakor.png
+00:42:46 | INFO: Starting glTF 2.0 export
+00:42:47 | WARNING: Mesh geometry_0 is not valid, and may be exported wrongly
+00:42:47 | INFO: Extracting primitive: geometry_0
+00:42:47 | INFO: Primitives created: 1
+00:42:47 | WARNING: There are more than 4 joint vertex influences.The 4 with highest weight will be used (and normalized).
+00:42:48 | INFO: Finished glTF 2.0 export in 1.0530145168304443 s
+INFO Draco mesh compression is available, use library at /home/hatch/workspace/tools/blender-4.2.3-linux-x64/4.2/python/lib/python3.11/site-packages/libextern_draco.so
+
+[rig] exported /home/hatch/workspace/rpg-crawler-game/art-work/incoming/batch2/work_B/rigged_boss_malakor.glb
+[rig] DONE unweighted=0
+
+Blender quit
