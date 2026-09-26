@@ -162,9 +162,17 @@ function detectTargetHipsHeight(target, rig) {
     const bones = rig.refs.skeleton.bones;
     const hip = bones.find((b) => canonicalBoneName(b.name) === 'hips');
     if (hip) {
+      // Parent-space height, NOT world: the hips position track is applied to
+      // the bone's LOCAL position and relativized around its local base, so
+      // a world-space height inflates posScale by the ancestor scale chain
+      // (e.g. 2.1x for elites with modelScale 1.25 x group 1.68) and buries
+      // the model on crouch/death. (2026-09-26 batch3 verification.)
       const v = new THREE.Vector3();
       hip.getWorldPosition(v);
-      return Math.abs(v.y) || 0.9;
+      const ps = new THREE.Vector3();
+      if (hip.parent) hip.parent.getWorldScale(ps);
+      const h = Math.abs(v.y) / (ps.y || 1);
+      return h || 0.9;
     }
   }
   return 0.9;
